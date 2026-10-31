@@ -8,7 +8,7 @@ Software (FDE track) first, then hardware. The Next.js app built here is also th
 |---|---|---|
 | L0 Setup + upload contract | Done | `dac4e65` |
 | L1 Transcribe | Done | `b3b6eb7` |
-| L2 Dashboard | Done | `9a26a1a` |
+| L2 Dashboard | Done | `9226a1a` |
 | L3 Understand | Done | `ad75e57` |
 | Move to Next.js 16 + TypeScript | Done | `22e9651`, `c959037` |
 | L4 Ask | **Next** | |
