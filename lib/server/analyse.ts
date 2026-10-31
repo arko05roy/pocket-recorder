@@ -1,4 +1,5 @@
 import { chatJson } from './groq';
+import { date, str, time } from './validate';
 import type { Analysis } from './db';
 import type { Mention, Segment } from '../types';
 
@@ -46,18 +47,6 @@ export async function analyse(recording: { recorded_at: string }, segments: Segm
 
 // ---------- validation: the model's output is untrusted ----------
 
-const DATE = /^\d{4}-\d{2}-\d{2}$/;
-const TIME = /^([01]\d|2[0-3]):[0-5]\d$/;
-
-const str = (v: unknown, max = 500): string | null => (typeof v === 'string' && v.trim() ? v.trim().slice(0, max) : null);
-// Date.parse quietly rolls 2026-02-30 over to March 2, so check the date
-// survives a round trip unchanged.
-const date = (v: unknown): string | null => {
-  if (typeof v !== 'string' || !DATE.test(v)) return null;
-  const d = new Date(`${v}T00:00:00Z`);
-  return !isNaN(d.getTime()) && d.toISOString().slice(0, 10) === v ? v : null;
-};
-const time = (v: unknown): string | null => (typeof v === 'string' && TIME.test(v) ? v : null);
 const list = (v: unknown): any[] => (Array.isArray(v) ? v : []);
 
 // Keep an item only if it cites a line that exists. The timestamp always

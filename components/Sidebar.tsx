@@ -70,7 +70,11 @@ export default function Sidebar({ recordings }: { recordings: RecordingSummary[]
         />
         <kbd>/</kbd>
       </label>
-      <Link href="/ask" className="ask-link" aria-current={pathname === '/ask' ? 'page' : undefined}>Ask the recordings</Link>
+      <nav className="links" aria-label="Pages">
+        {[['/ask', 'Ask the recordings'], ['/calendar', 'Calendar'], ['/drafts', 'Drafts']].map(([href, label]) => (
+          <Link key={href} href={href} className="ask-link" aria-current={pathname === href ? 'page' : undefined}>{label}</Link>
+        ))}
+      </nav>
       <nav className="list" aria-label="Recordings">
         {results ? <Results results={results} query={query.trim()} /> : <ByDay recordings={recordings} currentId={currentId} />}
       </nav>

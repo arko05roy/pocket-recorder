@@ -67,8 +67,34 @@ export interface Citation {
 
 export type AnswerPart = { type: 'text'; text: string } | { type: 'cite'; cite: Citation };
 
+// Something the agent suggests writing. Nothing is saved until the user
+// presses Confirm, and the server checks it again then.
+export interface EventProposal {
+  kind: 'event';
+  title: string;
+  date: string;              // YYYY-MM-DD
+  start_time: string | null; // HH:MM; null = all day
+  end_time: string | null;
+  attendees: string[];
+  source: Citation;
+}
+
+export interface DraftProposal {
+  kind: 'draft';
+  to: string;
+  subject: string;
+  body: string;
+  source: Citation;
+}
+
+export type Proposal = EventProposal | DraftProposal;
+
+export type CalendarEvent = Omit<EventProposal, 'kind'> & { id: number; created_at: string };
+export type EmailDraft = Omit<DraftProposal, 'kind'> & { id: number; created_at: string };
+
 export interface Answer {
   parts: AnswerPart[];
+  proposals: Proposal[];
   // The model's raw reply, sent back as history on the next question.
   raw: string;
 }

@@ -229,3 +229,29 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1
 .ask button { border: 0; border-radius: 6px; padding: 5px 14px; font: inherit; font-size: 14px; background: var(--ink); color: var(--paper); cursor: pointer; }
 .ask button:disabled { opacity: .35; cursor: default; }
 @media (max-width: 760px) { .cite { white-space: normal; } }
+
+/* Proposals, calendar, drafts */
+.links { display: grid; margin-bottom: 6px; }
+.links .ask-link { margin-bottom: 0; }
+.a-wrap { display: grid; gap: 10px; }
+.proposal { border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; max-width: 62ch; background: var(--paper); margin-bottom: 10px; }
+.proposal.cancelled { opacity: .5; }
+.proposal .kind { font-size: 12px; font-weight: 500; color: var(--muted); margin-bottom: 4px; }
+.p-title { font-weight: 500; }
+.p-meta { font-size: 13.5px; color: var(--muted); }
+.p-body { margin: 8px 0 0; white-space: pre-wrap; font-size: 14.5px; }
+.p-foot { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between; margin-top: 10px; }
+.p-foot .cite { margin: 0; }
+.p-actions { display: flex; gap: 6px; }
+.p-actions button, .ghost {
+  border: 1px solid var(--line); border-radius: 6px; padding: 3px 12px; font: inherit; font-size: 13.5px;
+  background: var(--paper); color: var(--ink); cursor: pointer;
+}
+.p-actions button:hover, .ghost:hover { background: var(--side); }
+.p-actions .primary { background: var(--ink); border-color: var(--ink); color: var(--paper); }
+.p-actions .primary:hover { background: var(--ink); opacity: .85; }
+.p-actions button:disabled, .ghost:disabled { opacity: .5; cursor: default; }
+.p-done { font-size: 13.5px; color: var(--muted); }
+.p-error { margin: 8px 0 0; font-size: 13.5px; color: #9F2A1F; }
+.saved { display: grid; grid-template-columns: 90px minmax(0, 1fr); gap: 12px; padding: 6px 0 10px; }
+.saved .when { font: 13px/1.9 var(--mono); color: var(--muted); }

@@ -2,7 +2,8 @@ import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import type {
-  ActionItem, Mention, RecordingDetail, RecordingSummary, SearchHit, Segment, Status,
+  ActionItem, CalendarEvent, DraftProposal, EmailDraft, EventProposal, Mention, RecordingDetail,
+  RecordingSummary, SearchHit, Segment, Status,
 } from '../types';
 
 export const DATA_DIR = join(process.cwd(), 'data');
@@ -89,6 +90,31 @@ function open() {
       date         TEXT,
       time         TEXT,
       source_s     REAL NOT NULL
+    );
+
+    -- Written only when the user confirms an agent proposal. The source is the
+    -- moment in a recording the proposal came from.
+    CREATE TABLE IF NOT EXISTS calendar_events (
+      id                  INTEGER PRIMARY KEY,
+      title               TEXT NOT NULL,
+      date                TEXT NOT NULL,
+      start_time          TEXT,
+      end_time            TEXT,
+      attendees           TEXT NOT NULL DEFAULT '[]',
+      source_recording_id TEXT NOT NULL REFERENCES recordings(id) ON DELETE CASCADE,
+      source_s            REAL NOT NULL,
+      created_at          TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    -- Drafts only. Nothing in this app sends email.
+    CREATE TABLE IF NOT EXISTS email_drafts (
+      id                  INTEGER PRIMARY KEY,
+      "to"                TEXT NOT NULL,
+      subject             TEXT NOT NULL,
+      body                TEXT NOT NULL,
+      source_recording_id TEXT NOT NULL REFERENCES recordings(id) ON DELETE CASCADE,
+      source_s            REAL NOT NULL,
+      created_at          TEXT NOT NULL DEFAULT (datetime('now'))
     );
   `);
 
@@ -271,6 +297,48 @@ export function listAllActionItems(status?: 'open' | 'done') {
     recording_id: string; recorded_at: string; title: string | null;
   }>);
 }
+
+// Rows carry only the source id and second; the citation label is rebuilt
+// from the recording so it stays right if the title changes.
+function withSource<T>(row: any): T {
+  const { source_recording_id, source_s, attendees, ...rest } = row;
+  const rec = getRecording(source_recording_id)!;
+  return {
+    ...rest,
+    ...(attendees !== undefined && { attendees: JSON.parse(attendees) }),
+    source: {
+      recording_id: rec.id,
+      label: rec.title ?? `${rec.device_id} ${rec.recorded_at.slice(11, 16)}`,
+      recorded_at: rec.recorded_at,
+      start_s: source_s,
+    },
+  } as T;
+}
+
+export function insertEvent(e: Omit<EventProposal, 'kind'>) {
+  return Number(db.prepare(`
+    INSERT INTO calendar_events (title, date, start_time, end_time, attendees, source_recording_id, source_s)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `).run(e.title, e.date, e.start_time, e.end_time, JSON.stringify(e.attendees), e.source.recording_id, e.source.start_s).lastInsertRowid);
+}
+
+export function insertDraft(d: Omit<DraftProposal, 'kind'>) {
+  return Number(db.prepare(`
+    INSERT INTO email_drafts ("to", subject, body, source_recording_id, source_s) VALUES (?, ?, ?, ?, ?)
+  `).run(d.to, d.subject, d.body, d.source.recording_id, d.source.start_s).lastInsertRowid);
+}
+
+export function listEvents() {
+  return db.prepare('SELECT * FROM calendar_events ORDER BY date, start_time IS NOT NULL, start_time')
+    .all().map(withSource<CalendarEvent>);
+}
+
+export function listDrafts() {
+  return db.prepare('SELECT * FROM email_drafts ORDER BY created_at DESC, id DESC').all().map(withSource<EmailDraft>);
+}
+
+export const deleteEvent = (id: number) => Number(db.prepare('DELETE FROM calendar_events WHERE id = ?').run(id).changes);
+export const deleteDraft = (id: number) => Number(db.prepare('DELETE FROM email_drafts WHERE id = ?').run(id).changes);
 
 // Recordings left mid-pipeline by a crash or restart.
 export function unfinishedRecordingIds() {
