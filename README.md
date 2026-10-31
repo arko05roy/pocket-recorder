@@ -1,6 +1,6 @@
 # Pocket Recorder
 
-My entry for the Vyohm **Pocket Recorder Challenge**. The brief has two halves: a recorder that captures speech, and the AI that understands it. This repo has both. The **FDE track is complete (L1–L6)**. The **hardware track is at H1**: the microphone is blocked on a wiring fault, described below.
+My entry for the Vyohm **Pocket Recorder Challenge**. The brief has two halves: a recorder that captures speech, and the AI that understands it. This repo has both. The **FDE track is complete (L1–L6)**. The **hardware track is at H1**: the microphone is blocked on a wiring fault, described below. The **ESP32 printer track is complete**: a finished doc prints on a real printer, from the app, through an ESP32 bridge.
 
 The app is a Next.js server on port 8000. It accepts clips through the hand-off contract (`POST /upload`) and transcribes them with Whisper. Claude then pulls out summaries, action items, people and dates, and answers questions with the recording and the second each fact came from. You can also record straight from the browser, and the screen builds tables, timelines and a map of who you mentioned while you talk.
 
@@ -28,6 +28,20 @@ The app is a Next.js server on port 8000. It accepts clips through the hand-off 
 | **H1 Board alive** | ✅ Done | LED cycles red → green → blue, serial prints `ready` (`firmware/recorder`). |
 | **H2 Clean audio** | ⛔ Blocked | The microphone gives no usable audio. See [Known problems](#known-problems). |
 | **H3–H6** | Not started | Depend on a working microphone. |
+
+### Hardware: ESP32 printer track ✅ complete
+
+The recorder isn't finished, but the second piece of hardware is. An ESP32-S3 acts as a print bridge between the app and an office printer, so a doc written from a voice note prints with one press of **Print**.
+
+| Piece | What it does |
+|---|---|
+| **Network bridge** (`firmware/printer`) | Finds printers on the Wi-Fi (Bonjour/mDNS adverts plus a sweep of the subnet for ports 9100, 631 and 515). It checks a printer answers before connecting, then sends jobs over a raw port-9100 socket. |
+| **USB print server** (`firmware/usbprinter`) | The S3's USB OTG port runs as a USB host (GPIO 19 D−, GPIO 20 D+) wired to a USB-A socket for the printer's cable. The printer is reachable two ways: as a port-9100 network printer the Mac can add ("HP Jetdirect – Socket"), and through `POST /print` from the app. |
+| **App side** | The printer panel scans, connects and shows the bridge's status. The board says hello every 30 s, so the app shows "ESP32 printer bridge connected" and knows its IP. Docs are finalised and printed from `/docs`, and the agent can propose a print for you to confirm. |
+| **Status LED** | Blue: joining Wi-Fi. Green: ready. Purple: scanning. Yellow: no printer (USB). White: printing. Red: last job failed. |
+| **Testing without a printer** | `npm run fake-printer` listens on port 9100 like a real printer and prints each job to the terminal. |
+
+Wi-Fi details live in `firmware/*/secrets.h` (gitignored); copy `secrets.h.example` to start.
 
 ---
 
@@ -147,7 +161,7 @@ Built after the six levels worked:
 - **Docs only on request.** A voice note that asks for a "doc", "document", "write-up" or "memo" is written up as an editable doc on `/docs`, which can be printed.
 - **Knowledge graph** (`/graph`, `/people`). People, places and organisations, and how they relate ("Atharv reports to Paruk"), gathered across recordings.
 - **Calendar and drafts** (`/calendar`, `/drafts`), with "Open in Gmail" for a draft. It opens Gmail's compose window; nothing is sent automatically.
-- **ESP32 print bridge** (`firmware/printer`, `firmware/usbprinter`). Finds network printers or drives a USB printer, so a finished doc prints from the app. `npm run fake-printer` stands in for a printer when testing.
+- **ESP32 print bridge**: complete. See [the printer track](#hardware-esp32-printer-track--complete).
 
 ---
 
