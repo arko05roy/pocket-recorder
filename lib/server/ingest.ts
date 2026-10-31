@@ -101,4 +101,4 @@ export function keepRealSpeech(
     .filter((s, n, all) => n === 0 || norm(s.text) !== norm(all[n - 1].text));
 }
 
-const norm = (t: string) => t.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+const norm = (t: string) => t.toLowerCase().replace(/[^\p{L}\p{M}\p{N}]+/gu, ' ').trim();

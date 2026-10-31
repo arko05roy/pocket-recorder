@@ -1,15 +1,16 @@
 import type { CardKind, Entity, EntityType, LiveCard, LiveLine, LiveState, Relation } from '../types';
-import { ask, textOf } from './claude';
+import { ask, FAST_MODEL, textOf } from './claude';
 import { str } from './validate';
 
 const SYSTEM = `You watch a live transcript while it is being recorded and keep a set of cards up to date for the person recording.
 
-Cards (0 to 4, most useful first). Pick the kinds that fit what is actually being said:
-- "table": repeated, structured things such as orders (item, quantity, notes, customer), prices, inventory, attendees, scores. Short column names.
+Cards (0 to 4, most useful first). Pick the kinds that fit what is actually being said.
+ITEMS RULE: whenever items or products are listed (an order, supplies, shopping, inventory, things to buy, prepare or bring), they ALWAYS go in a "table" with columns like Item, Quantity, Notes (add For/Customer when said), one row per item, from the very first item mentioned, even if the sentence isn't finished. Put this table first. Never put item quantities in a "metrics" card or a checklist instead.
+- "table": repeated, structured things such as orders (item, quantity, notes, customer), prices, inventory, attendees, scores, and also tasks, meetings or emails that each have several details (who, what, when). Short column names. Prefer a table whenever two or more similar entries share details, and always make one if a table, sheet or CSV is asked for.
 - "checklist": tasks and to-dos. label is empty.
 - "facts": key details worth keeping (decisions, addresses, requirements). label is a short key, text the value.
 - "timeline": things tied to a date or time (meetings, deadlines, deliveries). label is the date or time as said, text what happens.
-- "metrics": numbers that were said (budget, headcount, price, quantity). label is the number with its unit as said, text what it measures.
+- "metrics": stand-alone numbers that were said (budget, headcount, a total price); never item quantities, which belong in the items table. label is the number with its unit as said, text what it measures.
 - "quotes": up to 3 lines worth keeping word for word. text is the exact words, label who said them if known, else empty.
 Don't make a card for small talk, and don't repeat the same information in two cards.
 
@@ -92,6 +93,7 @@ export async function buildLive(lines: LiveLine[], previous: Previous): Promise<
   const transcript = lines.map((l) => `[${l.i}] ${l.text}`).join('\n');
   const prev = previous.length ? `Previous cards: ${JSON.stringify(previous)}\n\n` : '';
   const res = await ask({
+    model: FAST_MODEL, // Sonnet: this reruns every few seconds, so speed matters most
     system: SYSTEM,
     messages: [{ role: 'user', content: `${prev}Transcript so far:\n${transcript}` }],
     // Low effort: this reruns every few seconds while recording.

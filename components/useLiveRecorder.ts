@@ -55,8 +55,9 @@ export function useLiveRecorder(onText: (text: string, soFar: string) => void) {
     queue.current = queue.current.then(async () => {
       setHearing(true);
       try {
+        const pcm = downsample(samples, rate);
         const form = new FormData();
-        form.set('audio', encodeWav(downsample(samples, rate)), 'chunk.wav');
+        form.set('audio', encodeWav(pcm), 'chunk.wav');
         form.set('prompt', transcript.current);
         const res = await fetch('/api/live/chunk', { method: 'POST', body: form });
         const text: string = res.ok ? (await res.json()).text : '';

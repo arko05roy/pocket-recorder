@@ -7,13 +7,16 @@ export const claude = new Anthropic();
 
 export const CLAUDE_MODEL = process.env.CLAUDE_MODEL || 'claude-opus-5-5';
 
-type Params = Omit<Anthropic.Beta.MessageCreateParamsNonStreaming, 'model' | 'max_tokens' | 'betas' | 'fallbacks'>;
+type Params = Omit<Anthropic.Beta.MessageCreateParamsNonStreaming, 'model' | 'max_tokens' | 'betas' | 'fallbacks'> & { model?: string };
+
+// Sonnet for quick, mechanical passes (cleaning a transcript).
+export const FAST_MODEL = process.env.CLAUDE_FAST_MODEL || 'claude-sonnet-5-5';
 
 // One request with our defaults. If the model's safety classifier declines
 // (stop_reason "refusal"), the API reruns it on a fallback model by itself.
-export async function ask(params: Params) {
+export async function ask({ model = CLAUDE_MODEL, ...params }: Params) {
   const res = await claude.beta.messages.create({
-    model: CLAUDE_MODEL,
+    model,
     max_tokens: 16000,
     betas: ['server-side-fallback-2026-07-01'],
     fallbacks: 'default',

@@ -218,3 +218,26 @@ export interface FoundPrinter {
 
 // port 9100 = raw socket to the printer; 631 = IPP print queue (queue = its name, e.g. a Mac sharing a USB printer).
 export interface SavedPrinter { host: string; port: number; name: string; queue?: string }
+
+// After a voice note: the transcript cleaned up, then a full report.
+export interface CleanTurn { speaker: number; text: string }
+export interface Recap {
+  title: string;
+  kind: string;                 // "Planning meeting", "Order", "1:1"…
+  summary: string;
+  participants: { speaker: number; name: string; role: string }[];
+  key_points: string[];
+  decisions: string[];
+  action_items: { task: string; owner: string; due: string; priority: 'high' | 'medium' | 'low' }[];
+  timeline: { when: string; what: string }[];
+  numbers: { value: string; label: string }[];
+  tables?: { title: string; columns: string[]; rows: string[][] }[];
+  open_questions: string[];
+  next_steps: string[];
+}
+export interface RecapState {
+  stage: 'cleaning' | 'writing' | 'done' | 'error';
+  clean?: CleanTurn[];
+  report?: Recap;
+  error?: string;
+}

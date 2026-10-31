@@ -3,8 +3,9 @@ import { ingestGraph } from './db';
 import { str } from './validate';
 
 const TYPES = ['person', 'item', 'date', 'amount', 'place', 'org'];
-// Only lasting things become nodes. Dates and amounts belong to one moment.
-const NODE_TYPES = new Set(['person', 'org', 'place', 'item']);
+// Only proper nouns become nodes: people, places and organisations. Items
+// ("15 notebooks"), dates and amounts stay in the cards, not the graph.
+const NODE_TYPES = new Set(['person', 'org', 'place']);
 
 // Store a finished voice note in the graph. Everything comes from the
 // browser, so it's checked again: each entity must appear in the line it

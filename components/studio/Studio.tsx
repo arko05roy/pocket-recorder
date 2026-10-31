@@ -5,24 +5,31 @@ import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { VoiceOrb, type VoiceOrbState } from '@/components/assistant-ui/elements/voice';
 import { StreamingText, type Segment } from '@/components/assistant-ui/elements/streaming-text';
-import type { Answer, Doc, Entity, LiveCard, LiveLine, LiveState, NodeProfile, Relation } from '@/lib/types';
+import type { Answer, CleanTurn, Doc, Entity, LiveCard, LiveLine, LiveState, NodeProfile, Recap, RecapState, Relation } from '@/lib/types';
 import { fmtClock, recordingHref } from '@/lib/format';
-import { Parts, ProposalCard } from '../Answer';
+import { Parts, ProposalList } from '../Answer';
 import { DocCard } from '../DocView';
 import { useLiveRecorder } from '../useLiveRecorder';
 import { CardView } from './Cards';
+import { RecapCard } from './RecapCard';
 import Constellation from './Constellation';
 import PersonCard from './PersonCard';
 import { chipStyle, personPalette, type Palette } from './colors';
 
 export type Turn =
-  | { kind: 'voice'; id: number; lines: LiveLine[]; live: LiveState; updating?: boolean; savedId: string | null; durationS: number; inGraph?: boolean; docAsked?: boolean }
+  | { kind: 'voice'; id: number; lines: LiveLine[]; live: LiveState; updating?: boolean; savedId: string | null; durationS: number; inGraph?: boolean; docAsked?: boolean; actAsked?: boolean; recap?: RecapState; recordedAt?: string }
   | { kind: 'user'; text: string }
   | { kind: 'answer'; answer: Answer }
   | { kind: 'error'; text: string };
 type Voice = Extract<Turn, { kind: 'voice' }>;
 
 const EMPTY: LiveState = { cards: [], entities: [], relations: [] };
+
+// A doc is written only when the voice note asks for one in so many words.
+// The graph holds proper nouns only; items, dates and amounts stay in the cards.
+const GRAPH_TYPES = new Set<Entity['type']>(['person', 'place', 'org']);
+
+const ASKS_FOR_DOC = /(?<![\p{L}])(docs?|documents?|documentation|write[- ]?up|memo)(?![\p{L}])/iu;
 
 
 const PROMPTS = [
@@ -37,10 +44,13 @@ export default function Studio({ chatId, initialTurns, chats }: {
   chats: { id: string; title: string; updated_at: string }[];
 }) {
   const router = useRouter();
-  const [turns, setTurns] = useState<Turn[]>(() => initialTurns.map((t) => (t.kind === 'voice' ? { ...t, updating: false } : t)));
+  const [turns, setTurns] = useState<Turn[]>(() => initialTurns.map((t) => (t.kind === 'voice'
+    ? { ...t, updating: false, recap: t.recap && (t.recap.stage === 'cleaning' || t.recap.stage === 'writing') ? { ...t.recap, stage: 'error' as const, error: 'The page reloaded before the report was finished.' } : t.recap }
+    : t)));
   const [draft, setDraft] = useState('');
   const [busy, setBusy] = useState(false);
   const [drafting, setDrafting] = useState(false);
+  const [acting, setActing] = useState(0); // voice notes being turned into events and drafts
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<number | null>(null);
   const [tab, setTab] = useState<'chat' | 'board'>('chat');
@@ -89,7 +99,7 @@ export default function Studio({ chatId, initialTurns, chats }: {
     }
   }, [turns, chatId, patchVoice]);
 
-  // Every finished voice note (stopped, saved, last live update done) is sent
+  // A finished voice note that asks for a doc ("make a document…") is sent
   // whole to Claude, which writes it up as a doc; the card shows in the chat.
   // docStarted guards against the effect running twice before the docAsked
   // flag lands in state (which once made two copies of a doc).
@@ -100,7 +110,7 @@ export default function Studio({ chatId, initialTurns, chats }: {
       if (t.kind !== 'voice' || !t.savedId || t.updating || t.docAsked || live.current.running) continue;
       if (docStarted.current.has(t.id)) continue;
       const transcript = t.lines.map((l) => l.text).join(' ').trim();
-      if (!transcript) continue;
+      if (!transcript || !ASKS_FOR_DOC.test(transcript)) continue; // only when a doc is asked for
       docStarted.current.add(t.id);
       patchVoice(t.id, () => ({ docAsked: true }));
       setBusy(true);
@@ -121,6 +131,44 @@ export default function Studio({ chatId, initialTurns, chats }: {
     }
   }, [turns, patchVoice]);
 
+  // Every finished voice note is also handed to the assistant as instructions:
+  // meetings to book or move and emails to write come back as event and draft
+  // cards to confirm. The assistant cites the saved recording, so this waits
+  // until the full transcript is ready (the live one is only a preview).
+  const actStarted = useRef(new Set<number>(initialTurns.flatMap((t) => (t.kind === 'voice' ? [t.id] : []))));
+  useEffect(() => {
+    for (const t of turns) {
+      if (t.kind !== 'voice' || !t.savedId || t.updating || t.actAsked || actStarted.current.has(t.id)) continue;
+      const transcript = t.lines.map((l) => l.text).join(' ').trim();
+      if (!transcript) continue;
+      actStarted.current.add(t.id);
+      patchVoice(t.id, () => ({ actAsked: true }));
+      setActing((n) => n + 1);
+      const savedId = t.savedId;
+      (async () => {
+        for (let tries = 0; tries < 60; tries++) {
+          const rec = await fetch(`/api/recordings/${encodeURIComponent(savedId)}`).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+          if (rec?.status === 'ready' || rec?.status === 'error') break;
+          await new Promise((r) => setTimeout(r, 2000));
+        }
+        const content = `I just recorded this voice note: “${transcript.slice(0, 3000)}”\n\n`
+          + 'Carry out what I asked for in it. Propose a calendar event for every meeting to book, and for every meeting to move propose it at its new date and time (keep the same time and attendees if I said so). '
+          + 'Propose an email draft for every email to write; drafts are never sent. Use the latest version where I corrected myself. '
+          + 'Don’t write any document. '
+          + 'End with a short read-back of every instruction, saying what you did for each.';
+        const res = await fetch('/api/ask', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ messages: [{ role: 'user', content }], focus: savedId, docs: false }),
+        }).catch(() => null);
+        const body = await res?.json().catch(() => null);
+        setTurns((all) => [...all, res?.ok && body
+          ? { kind: 'answer', answer: body }
+          : { kind: 'error', text: body?.error ?? 'The events and drafts from this voice note couldn’t be prepared.' }]);
+      })().finally(() => setActing((n) => n - 1));
+    }
+  }, [turns, patchVoice]);
+
   // On opening a chat: a voice note that asked for a doc but has no doc card
   // after it (the page reloaded while it was being drafted) gets its card back.
   useEffect(() => {
@@ -132,6 +180,7 @@ export default function Studio({ chatId, initialTurns, chats }: {
         .then((docs: Doc[]) => {
           const missing = docs.filter((d) => !shownDocs.has(d.id));
           if (!missing.length) return;
+          missing.forEach((d) => shownDocs.add(d.id)); // two notes never bring back the same doc
           const raw = 'Your doc is on the Docs page, ready to edit, finalize and print.';
           setTurns((all) => [...all, { kind: 'answer', answer: { raw, parts: [{ type: 'text', text: raw }], proposals: [], docs: missing } }]);
         })
@@ -179,7 +228,28 @@ export default function Studio({ chatId, initialTurns, chats }: {
     refreshLive();
   }, [patchVoice, refreshLive]));
 
-  useEffect(() => { end.current?.scrollIntoView({ block: 'end', behavior: 'smooth' }); }, [turns.length, busy]);
+  useEffect(() => { end.current?.scrollIntoView({ block: 'end', behavior: 'smooth' }); }, [turns.length, busy, acting]);
+
+  // The post-recording report: Sonnet cleans the transcript, then Opus writes
+  // the report from it. Each result is shown as soon as it lands.
+  const makeRecap = useCallback(async (id: number, lines: LiveLine[], recordedAt: string) => {
+    if (!lines.length) return;
+    const post = async (url: string, body: object) => {
+      const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).catch(() => null);
+      const json = await res?.json().catch(() => null);
+      if (!res?.ok) throw new Error(json?.error ?? 'The server can’t be reached.');
+      return json;
+    };
+    patchVoice(id, () => ({ recap: { stage: 'cleaning' } }));
+    try {
+      const { turns: clean } = (await post('/api/recap/clean', { lines })) as { turns: CleanTurn[] };
+      patchVoice(id, () => ({ recap: { stage: 'writing', clean } }));
+      const report = (await post('/api/recap/report', { turns: clean, recorded_at: recordedAt })) as Recap;
+      patchVoice(id, () => ({ recap: { stage: 'done', clean, report } }));
+    } catch (err) {
+      patchVoice(id, (t) => ({ recap: { ...t.recap, stage: 'error', error: (err as Error).message } }));
+    }
+  }, [patchVoice]);
 
   const startRecording = async () => {
     setError(null);
@@ -199,8 +269,10 @@ export default function Studio({ chatId, initialTurns, chats }: {
     const durationS = rec.elapsed;
     try {
       const savedId = await rec.stop();
-      patchVoice(id, () => ({ savedId, durationS }));
+      const recordedAt = new Date(Date.now() - durationS * 1000).toISOString();
+      patchVoice(id, () => ({ savedId, durationS, recordedAt }));
       refreshLive();
+      makeRecap(id, live.current.lines, recordedAt); // straight away, alongside the live cards' last pass
     } catch (err) {
       setTurns((all) => [...all, { kind: 'error', text: `The recording wasn’t saved: ${(err as Error).message}` }]);
     }
@@ -253,12 +325,15 @@ export default function Studio({ chatId, initialTurns, chats }: {
   const graphItems = useMemo(() => {
     const m = new Map<string, { text: string; type: Entity['type']; mentions: number; said: string }>();
     for (const e of heard.entities) {
+      if (!GRAPH_TYPES.has(e.type)) continue; // only people, places and organisations
       const k = e.text.toLowerCase();
       const g = m.get(k);
       if (g) g.mentions++; else m.set(k, { text: e.text, type: e.type, mentions: 1, said: e.said });
     }
     return [...m.values()];
   }, [heard.entities]);
+  const graphKeys = useMemo(() => new Set(graphItems.map((g) => g.text.toLowerCase())), [graphItems]);
+  const graphLinks = useMemo(() => heard.relations.filter((r) => graphKeys.has(r.from.toLowerCase()) && graphKeys.has(r.to.toLowerCase())), [heard.relations, graphKeys]);
   const people = useMemo(() => [...new Map(heard.entities.filter((e) => e.type === 'person').map((e) => [e.text.toLowerCase(), e.text])).values()], [heard.entities]);
   const saved = useSavedProfiles(people, graphVersion);
 
@@ -273,7 +348,7 @@ export default function Studio({ chatId, initialTurns, chats }: {
         <div className="tabs" role="tablist">
           <button role="tab" aria-selected={tab === 'chat'} onClick={() => setTab('chat')}>Chat</button>
           <button role="tab" aria-selected={tab === 'board'} onClick={() => setTab('board')}>
-            Board{heard.entities.length > 0 && <span className="tab-count">{new Set(heard.entities.map((e) => e.text.toLowerCase())).size}</span>}
+            Board{graphItems.length > 0 && <span className="tab-count">{graphItems.length}</span>}
           </button>
         </div>
         <div className="scroll">
@@ -307,7 +382,11 @@ export default function Studio({ chatId, initialTurns, chats }: {
                     active={shown?.id === t.id}
                     onShow={() => { setSelected(t.id); setTab('board'); }}
                     profiles={notePeople(t).map((name) => mergeProfile(name, heard, saved.get(name.toLowerCase())))}
-                  />
+                  >
+                    {t.recap && (
+                      <RecapCard recap={t.recap} durationS={t.durationS} onRetry={() => makeRecap(t.id, t.lines, t.recordedAt ?? new Date().toISOString())} />
+                    )}
+                  </VoiceNote>
                 );
               }
               if (t.kind === 'user') return <div key={n} className="msg me"><div className="bubble">{t.text}</div></div>;
@@ -318,12 +397,13 @@ export default function Studio({ chatId, initialTurns, chats }: {
                   <div className="bot-body">
                     <p className="answer"><Parts parts={t.answer.parts} /></p>
                     {(t.answer.profiles ?? []).map((p) => <PersonCard key={p.id} profile={p} palette={palette} />)}
-                    {t.answer.proposals.map((p, k) => <ProposalCard key={k} proposal={p} />)}
+                    {t.answer.proposals.length > 0 && <ProposalList proposals={t.answer.proposals} />}
                     {(t.answer.docs ?? []).map((d) => <DocCard key={d.id} doc={d} />)}
                   </div>
                 </div>
               );
             })}
+            {acting > 0 && <div className="msg bot"><div className="bot-mark thinking" aria-hidden="true" /><p className="answer muted">Turning your instructions into calendar events and email drafts…</p></div>}
             {busy && <div className="msg bot"><div className="bot-mark thinking" aria-hidden="true" /><p className="answer muted">{drafting ? 'Writing this up as a doc…' : 'Searching your recordings…'}</p></div>}
             <div ref={end} />
           </div>
@@ -370,9 +450,9 @@ export default function Studio({ chatId, initialTurns, chats }: {
         <div className="board-graph">
           <div className="board-label">
             <span>Constellation</span>
-            <span className="mono">{new Set(heard.entities.map((e) => e.text.toLowerCase())).size} nodes · {heard.relations.length} links</span>
+            <span className="mono">{graphItems.length} nodes · {graphLinks.length} links</span>
           </div>
-          <Constellation nodes={graphItems} relations={heard.relations} palette={palette} />
+          <Constellation nodes={graphItems} relations={graphLinks} palette={palette} />
           <Legend />
         </div>
         <div className="board-cards">
@@ -401,35 +481,60 @@ const titleOf = (turns: Turn[]) => {
   return 'New chat';
 };
 
-function VoiceNote({ turn, live, hearing, elapsed, palette, active, onShow, profiles }: {
+function VoiceNote({ turn, live, hearing, elapsed, palette, active, onShow, profiles, children }: {
   turn: Voice; live: boolean; hearing: boolean; elapsed: number; palette: Palette; active: boolean; onShow: () => void;
-  profiles: ReturnType<typeof mergeProfile>[];
+  profiles: ReturnType<typeof mergeProfile>[]; children?: React.ReactNode;
 }) {
   const segments = useMemo(() => highlight(turn.lines, turn.live.entities, palette), [turn.lines, turn.live.entities, palette]);
   const cards = turn.live.cards.length;
   return (
-    <div className="msg me">
-      <div className={`voice${live ? ' live' : ''}${active ? ' active' : ''}`}>
-        <div className="voice-head">
-          <span className={live ? 'live-dot' : 'still-dot'} aria-hidden="true" />
-          <span>{live ? 'Listening' : 'Voice note'}</span>
-          <span className="mono">{fmtClock(elapsed)}</span>
-          {hearing && <span className="hearing">transcribing</span>}
+    <>
+      <div className="msg me">
+        <div className={`voice${live ? ' live' : ''}${active ? ' active' : ''}`}>
+          <div className="voice-head">
+            <span className={live ? 'live-dot' : 'still-dot'} aria-hidden="true" />
+            <span>{live ? 'Listening' : 'Voice note'}</span>
+            <span className="mono">{fmtClock(elapsed)}</span>
+            {hearing && <span className="hearing">transcribing</span>}
+          </div>
+          {segments.length ? (
+            <LiveText segments={segments} streaming={live} />
+          ) : <p className="voice-wait">{live ? 'Start talking. Your words appear about three seconds behind you.' : 'No speech was picked up.'}</p>}
+          <div className="voice-foot">
+            {cards > 0 && <button type="button" onClick={onShow}>{cards} card{cards === 1 ? '' : 's'} on the board</button>}
+            {turn.savedId && <Link href={recordingHref(turn.savedId)}>Full transcript ›</Link>}
+          </div>
         </div>
-        {segments.length ? (
-          <LiveText segments={segments} streaming={live} />
-        ) : <p className="voice-wait">{live ? 'Start talking. Your words appear about three seconds behind you.' : 'No speech was picked up.'}</p>}
-        <div className="voice-foot">
-          {cards > 0 && <button type="button" onClick={onShow}>{cards} card{cards === 1 ? '' : 's'} on the board</button>}
-          {turn.savedId && <Link href={recordingHref(turn.savedId)}>Full transcript ›</Link>}
-        </div>
+        {(turn.live.cards.length > 0 || (live && turn.updating && turn.lines.length > 0)) && (
+          <section className="live-tray" aria-label="Built from this voice note" aria-busy={turn.updating}>
+            <header className="live-tray-head">
+              <span className={`tray-dot${turn.updating ? ' on' : ''}`} aria-hidden="true" />
+              <span>{live ? 'Building as you talk' : 'Built from this voice note'}</span>
+              <span className="tray-meta">
+                {turn.updating ? 'updating…' : `${cards} card${cards === 1 ? '' : 's'}`}
+              </span>
+            </header>
+            {cards > 0 ? (
+              <div className="live-tray-grid">
+                {turn.live.cards.map((c, k) => (
+                  <div key={`${c.kind}-${c.title}-${k}`} className={`tray-item k-${c.kind}`}>
+                    <CardView card={c} lines={turn.lines} />
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="live-tray-grid"><div className="tray-skel" /><div className="tray-skel" /></div>
+            )}
+          </section>
+        )}
+        {profiles.length > 0 && (
+          <div className="note-people">
+            {profiles.map((p) => <PersonCard key={p.name.toLowerCase()} profile={p} palette={palette} isNew />)}
+          </div>
+        )}
       </div>
-      {profiles.length > 0 && (
-        <div className="note-people">
-          {profiles.map((p) => <PersonCard key={p.name.toLowerCase()} profile={p} palette={palette} isNew />)}
-        </div>
-      )}
-    </div>
+      {children}
+    </>
   );
 }
 
@@ -476,7 +581,7 @@ function useSavedProfiles(names: string[], version: number) {
 }
 
 function Legend() {
-  const items: [string, Entity['type']][] = [['People', 'person'], ['Things', 'item'], ['Dates', 'date'], ['Amounts', 'amount'], ['Places', 'place'], ['Orgs', 'org']];
+  const items: [string, Entity['type']][] = [['People', 'person'], ['Places', 'place'], ['Orgs', 'org']];
   return (
     <div className="legend">
       {items.map(([label, type]) => (
@@ -495,7 +600,7 @@ function highlight(lines: LiveLine[], entities: Entity[], palette: Palette): Seg
   for (const e of entities) if (!terms.has(e.text.toLowerCase())) terms.set(e.text.toLowerCase(), e);
   const sorted = [...terms.values()].sort((a, b) => b.text.length - a.text.length);
   const pattern = sorted.length
-    ? new RegExp(`(?<![\\p{L}\\p{N}])(${sorted.map((e) => escape(e.text)).join('|')})(?![\\p{L}\\p{N}])`, 'giu')
+    ? new RegExp(`(?<![\\p{L}\\p{M}\\p{N}])(${sorted.map((e) => escape(e.text)).join('|')})(?![\\p{L}\\p{M}\\p{N}])`, 'giu')
     : null;
   const out: Segment[] = [];
   for (const line of lines) {

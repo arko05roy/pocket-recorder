@@ -23,7 +23,18 @@ export function CardView({ card, lines }: { card: LiveCard; lines: LiveLine[] })
     setCopied(true);
     setTimeout(() => setCopied(false), 1400);
   };
-  const head = (extra?: React.ReactNode) => (
+  // Every card downloads as CSV: tables as they are, lists as label/text columns.
+  const csvName = `${title.toLowerCase().replace(/[^\w]+/g, '-').replace(/^-|-$/g, '') || 'card'}.csv`;
+  const LIST_COLS: Record<LiveCard['kind'], [string, string] | null> = {
+    table: null, checklist: null, facts: ['Detail', 'Value'], timeline: ['When', 'What'], metrics: ['Value', 'Measure'], quotes: ['Who', 'Quote'],
+  };
+  const listCsv = () => {
+    const cols = LIST_COLS[card.kind];
+    download(csvName, cols
+      ? toCsv(cols, card.items.map((x) => [x.label, x.text]))
+      : toCsv(['Task', 'Done'], card.items.map((x, n) => [x.text, done.has(n) ? 'yes' : ''])));
+  };
+  const head = (extra: React.ReactNode = <button type="button" className="card-action" onClick={listCsv}>CSV</button>) => (
     <div className="card-head">
       <span className={`card-kind k-${card.kind}`}>{FALLBACK[card.kind]}</span>
       <h3>{title}</h3>

@@ -2,7 +2,7 @@ import { ask } from '@/lib/server/agent';
 
 export const dynamic = 'force-dynamic';
 
-// POST {messages: [{role: 'user'|'assistant', content}], focus?: recording id} → Answer.
+// POST {messages: [{role: 'user'|'assistant', content}], focus?: recording id, docs?: false} → Answer.
 export async function POST(request: Request) {
   const body = await request.json().catch(() => null);
   const raw = Array.isArray(body?.messages) ? body.messages : null;
@@ -14,7 +14,7 @@ export async function POST(request: Request) {
   }
   try {
     const focus = typeof body.focus === 'string' ? body.focus.slice(0, 200) : undefined;
-    return Response.json(await ask(messages, focus));
+    return Response.json(await ask(messages, focus, body.docs !== false));
   } catch (err) {
     console.error('ask failed', err);
     return Response.json({ error: 'The assistant is unavailable right now. Try again.' }, { status: 502 });

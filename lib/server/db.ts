@@ -309,7 +309,7 @@ export function listRecordings() {
 // characters like - or " can't break the syntax) and the last word matches as
 // a prefix, so results appear while typing.
 function ftsQuery(input: string) {
-  const words = input.match(/[\p{L}\p{N}]+/gu) ?? [];
+  const words = input.match(/[\p{L}\p{M}\p{N}]+/gu) ?? [];
   return words.map((w, i) => (i === words.length - 1 ? `"${w}"*` : `"${w}"`)).join(' ');
 }
 
@@ -334,7 +334,7 @@ export function searchSegments(input: string, limit = 50) {
 // For the agent: any word may match (OR), best matches first, full line text
 // plus enough about the recording to cite it.
 export function searchSegmentsAny(input: string, limit = 20) {
-  const words = input.match(/[\p{L}\p{N}]+/gu) ?? [];
+  const words = input.match(/[\p{L}\p{M}\p{N}]+/gu) ?? [];
   if (!words.length) return [];
   return db.prepare(`
     SELECT s.recording_id, s.idx, s.start_s, s.text, r.recorded_at, r.title
@@ -453,9 +453,14 @@ export function ingestGraph(source: string, nodes: { name: string; type: string;
 export function getGraph() {
   const nodes = db.prepare(`
     SELECT n.id, n.name, n.type, (SELECT count(*) FROM graph_mentions m WHERE m.node_id = n.id) AS mentions
-    FROM graph_nodes n ORDER BY mentions DESC, n.name
+    FROM graph_nodes n WHERE n.type IN ('person', 'place', 'org') ORDER BY mentions DESC, n.name
   `).all().map(plain<GraphNode>);
-  const edges = db.prepare('SELECT id, from_id, to_id, label, quote FROM graph_edges').all().map(plain<GraphEdge>);
+  // Nodes saved before items were left out of the graph are hidden, with their links.
+  const edges = db.prepare(`
+    SELECT e.id, e.from_id, e.to_id, e.label, e.quote FROM graph_edges e
+    JOIN graph_nodes a ON a.id = e.from_id JOIN graph_nodes b ON b.id = e.to_id
+    WHERE a.type IN ('person', 'place', 'org') AND b.type IN ('person', 'place', 'org')
+  `).all().map(plain<GraphEdge>);
   return { nodes, edges };
 }
 
@@ -463,7 +468,7 @@ export function getGraph() {
 export function getNodeProfile(name: string): NodeProfile | null {
   const node = db.prepare(`
     SELECT n.id, n.name, n.type, (SELECT count(*) FROM graph_mentions m WHERE m.node_id = n.id) AS mentions
-    FROM graph_nodes n WHERE n.key = ?
+    FROM graph_nodes n WHERE n.key = ? AND n.type IN ('person', 'place', 'org')
   `).get(name.toLowerCase());
   if (!node) return null;
   const links = db.prepare(`
@@ -482,7 +487,7 @@ export function listPeople() {
       (SELECT count(*) FROM graph_mentions m WHERE m.node_id = n.id) AS mentions,
       (SELECT count(*) FROM graph_edges e WHERE e.from_id = n.id OR e.to_id = n.id) AS links,
       (SELECT max(created_at) FROM graph_mentions m WHERE m.node_id = n.id) AS last_seen
-    FROM graph_nodes n ORDER BY n.type = 'person' DESC, mentions DESC, n.name
+    FROM graph_nodes n WHERE n.type IN ('person', 'place', 'org') ORDER BY n.type = 'person' DESC, mentions DESC, n.name
   `).all().map(plain<GraphNode & { links: number; last_seen: string | null }>);
 }
 
@@ -530,3 +535,5 @@ export const deleteDoc = (id: number) => Number(db.prepare('DELETE FROM docs WHE
 export const updateDoc = (id: number, title: string, sections: DocSection[]) => Number(db.prepare(
   "UPDATE docs SET title = ?, sections = ?, status = 'draft' WHERE id = ?",
 ).run(title, JSON.stringify(sections), id).changes);
+// Empty the knowledge graph. Edges and mentions go with the nodes (cascade).
+export const clearGraph = () => Number(db.prepare('DELETE FROM graph_nodes').run().changes);

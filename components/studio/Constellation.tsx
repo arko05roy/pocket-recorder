@@ -62,7 +62,7 @@ export default function Constellation({ nodes: items, relations, palette, select
       const old = nodes.current.get(key);
       next.set(key, old ? Object.assign(old, { mentions: n, type: e.type }) : {
         id: key, text: e.text, type: e.type, mentions: n,
-        x: size.w / 2 + (Math.random() - 0.5) * 60, y: size.h / 2 + (Math.random() - 0.5) * 60,
+        x: size.w / 2 + (jitter(key, 1) - 0.5) * 60, y: size.h / 2 + (jitter(key, 2) - 0.5) * 60,
       });
     }
     nodes.current = next;
@@ -194,4 +194,12 @@ export default function Constellation({ nodes: items, relations, palette, select
       )}
     </div>
   );
+}
+
+// Starting spot from the name, not Math.random: the server and the browser
+// must draw the same first frame, or React reports a hydration mismatch.
+function jitter(key: string, salt: number) {
+  let h = 2166136261 ^ salt;
+  for (let n = 0; n < key.length; n++) h = Math.imul(h ^ key.charCodeAt(n), 16777619);
+  return ((h >>> 0) % 10000) / 10000;
 }

@@ -367,7 +367,10 @@ function toParts(raw: string, ev: Evidence): AnswerPart[] {
 
 // focus: the recording this chat was just made from, if any. Its pipeline may
 // still be running, so the agent is told the id rather than its contents.
-export async function ask(history: { role: 'user' | 'assistant'; content: string }[], focus?: string): Promise<Answer> {
+// allowDocs false takes create_doc away (the voice-note action step must never
+// write a doc; that only happens when the user asks for one).
+export async function ask(history: { role: 'user' | 'assistant'; content: string }[], focus?: string, allowDocs = true): Promise<Answer> {
+  const tools = allowDocs ? TOOLS : TOOLS.filter((t) => t.name !== 'create_doc');
   const ev: Evidence = new Map();
   const proposals: Proposal[] = [];
   const profiles: NodeProfile[] = [];
@@ -379,7 +382,7 @@ export async function ask(history: { role: 'user' | 'assistant'; content: string
   const messages: Anthropic.Beta.BetaMessageParam[] = history.slice(-12);
 
   for (let step = 0; step < MAX_STEPS; step++) {
-    const res = await askClaude({ system, messages, tools: TOOLS });
+    const res = await askClaude({ system, messages, tools });
     // The whole reply goes back into the history unchanged, thinking blocks
     // included: the API checks that earlier turns were not edited.
     messages.push({ role: 'assistant', content: res.content });
