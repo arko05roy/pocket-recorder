@@ -11,9 +11,9 @@ Software (FDE track) first, then hardware. The Next.js app built here is also th
 | L2 Dashboard | Done | `9226a1a` |
 | L3 Understand | Done | `ad75e57` |
 | Move to Next.js 16 + TypeScript | Done | `22e9651`, `c959037` |
-| L4 Ask | Built; citations untested until real samples arrive | `c8e4abf` |
-| L5 Act | Built; agent proposals untested until real samples arrive | `e7b0678` |
-| L6 Honest & live | Built: honesty safeguards + evidence check, SSE live push | `3fa1e23`, `f42d75c` |
+| L4 Ask | Done; verified on 2 real lift-enquiry calls (5/5 answers cited correctly) | `c8e4abf` |
+| L5 Act | Done; verified on real calls (site-visit event and email draft proposed with sources) | `e7b0678` |
+| L6 Honest & live | Done; unanswerable questions on real calls refused | `3fa1e23`, `f42d75c` |
 | Claude Opus 5.5 for analysis + agent (Whisper stays) | Done | `04ec3e7` |
 | Chat studio: in-app recording with live 3 s Whisper chunks, generative cards, knowledge graph (People, Graph pages), device pop-ups, white UI | Built; tested by hand on real speech, not on official samples | this commit |
 | H1 Board alive | Done | |
@@ -116,6 +116,7 @@ Upload runs on a separate FreeRTOS task so it never blocks recording.
 ## Lessons so far
 
 - Test with silence: it exposed Whisper inventing text that would have broken honest answers.
+- Whisper turbo failed a real Hindi/English call (guessed English, translated, looped). large-v3 got it right: full recordings use large-v3, live chunks stay on turbo; consecutive repeated lines are dropped. The sample calls had no dates, so download time stood in for recorded_at.
 - Treat LLM output as untrusted input: validate every field and tie every item to a real transcript line.
 - `.gitignore` patterns without a leading `/` match at any depth (`recordings/` hid `app/api/recordings/`).
 - `node:sqlite` rows have a null prototype; copy them to plain objects before passing them to client components.

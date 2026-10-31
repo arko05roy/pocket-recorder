@@ -2,7 +2,12 @@ import { readFile } from 'node:fs/promises';
 import { basename } from 'node:path';
 import { groqFetch } from './groq';
 
-const MODEL = 'whisper-large-v3-turbo';
+// Full recordings use large-v3: on a real Hindi/English call, turbo guessed
+// English, translated badly and looped ("I will tell you about the time" x3),
+// while large-v3 transcribed it faithfully. Live chunks stay on turbo, where
+// speed matters more. Both can be changed in .env.
+const MODEL = process.env.WHISPER_MODEL || 'whisper-large-v3';
+const LIVE_MODEL = process.env.WHISPER_LIVE_MODEL || 'whisper-large-v3-turbo';
 
 // Whisper detects the language itself, so English and Hindi both work. But it
 // often writes spoken Hindi in Urdu (Arabic) script. When that happens we ask
@@ -48,7 +53,7 @@ export async function transcribeChunk(audio: Blob, prompt: string): Promise<stri
   const run = (language?: string) => groqFetch('/audio/transcriptions', () => {
     const form = new FormData();
     form.append('file', audio, 'chunk.wav');
-    form.append('model', MODEL);
+    form.append('model', LIVE_MODEL);
     form.append('response_format', 'json');
     form.append('temperature', '0');
     if (language) form.append('language', language);

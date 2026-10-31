@@ -95,5 +95,10 @@ export function keepRealSpeech(
   return segments
     .map((s) => ({ ...s, start: Math.min(s.start, durationS), end: Math.min(s.end, durationS) }))
     .filter((s) => /\p{L}|\p{N}/u.test(s.text))
-    .filter((s) => sound.some((r) => Math.min(s.end, r.end) - Math.max(s.start, r.start) >= MIN_OVERLAP_S));
+    .filter((s) => sound.some((r) => Math.min(s.end, r.end) - Math.max(s.start, r.start) >= MIN_OVERLAP_S))
+    // A line repeated word for word right after itself is Whisper looping,
+    // not speech (seen on a real call: the same sentence three times).
+    .filter((s, n, all) => n === 0 || norm(s.text) !== norm(all[n - 1].text));
 }
+
+const norm = (t: string) => t.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
