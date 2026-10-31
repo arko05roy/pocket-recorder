@@ -11,9 +11,9 @@ Software (FDE track) first, then hardware. The Next.js app built here is also th
 | L2 Dashboard | Done | `9226a1a` |
 | L3 Understand | Done | `ad75e57` |
 | Move to Next.js 16 + TypeScript | Done | `22e9651`, `c959037` |
-| L4 Ask | Built; citations untested until real samples arrive | |
+| L4 Ask | Built; citations untested until real samples arrive | `c8e4abf` |
 | L5 Act | Not started | |
-| L6 Honest & live | Partly: honesty safeguards in transcription and extraction; live push not started | |
+| L6 Honest & live | Partly: honesty safeguards in transcription, extraction and the agent's evidence check; live push not started | |
 | H1 Board alive | Done | |
 | H2–H6 Hardware | Waiting on mic soldering | |
 
@@ -80,7 +80,7 @@ To build (L5):
 - [x] **L3 Understand**: `gpt-oss-120b` in JSON mode reads a line-numbered transcript and returns title, summary, action items (who/what/when), meetings, dates, people. Every item must cite an existing line or it is dropped; timestamps come from our segments, never the model; dates validated strictly (rejects 2026-02-30); relative dates resolved against the recording's own date, null when unsure. Action items can be ticked done. On meaningless input it returns nothing.
 - [ ] **L4 Ask** (built, needs real samples to verify citations): `/ask` chat page. Groq tool-calling loop (max 6 steps) over four read-only tools: `search_transcripts` (FTS, any word), `list_recordings` (date range), `get_recording` (full transcript + extraction), `list_action_items`. The model cites with `[[id@seconds]]`; the server keeps only citations within 1.5 s of a moment a tool returned, snaps them to it, and renders `recording · date · mm:ss` chips that open the recording at that second. Made-up citations are dropped.
 - [ ] **L5 Act**: calendar view + drafts list; the agent *proposes* an event or draft, the UI shows a Confirm/Cancel card, and only Confirm writes it. Emails are never sent.
-- [ ] **L6 Honest & live** (honesty in extraction already done; agent and live push still to do): the system prompt plus a check that tools returned evidence; with no evidence the agent replies "The recordings don't say." SSE pushes new uploads and status changes to the dashboard.
+- [ ] **L6 Honest & live** (honesty done; live push still to do): the system prompt plus a server check: an answer with no citation that survived validation is replaced with "The recordings don't say." `list_recordings` records each recording at t=0 so whole-recording facts can be cited. Known limits: one valid citation lets the whole answer through; an empty DB and clarifying questions also get the refusal. SSE pushes new uploads and status changes to the dashboard (not started).
 
 Commit after each level (at least once an hour).
 
@@ -115,3 +115,4 @@ Upload runs on a separate FreeRTOS task so it never blocks recording.
 - `.gitignore` patterns without a leading `/` match at any depth (`recordings/` hid `app/api/recordings/`).
 - `node:sqlite` rows have a null prototype; copy them to plain objects before passing them to client components.
 - Next.js may load a module more than once; keep the DB connection and job queue on `globalThis`.
+- Groq validates tool arguments against the schema, and the model sends `null` for unused optional parameters: allow `null` in the schema or the call fails with 400.

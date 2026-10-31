@@ -6,6 +6,7 @@ import {
 import { chatWithTools, type ChatMessage } from './groq';
 
 const MAX_STEPS = 6;
+const NO_EVIDENCE = "The recordings don't say.";
 
 const TOOLS = [
   {
@@ -28,8 +29,10 @@ const TOOLS = [
       parameters: {
         type: 'object',
         properties: {
-          from: { type: 'string', description: 'YYYY-MM-DD, inclusive' },
-          to: { type: 'string', description: 'YYYY-MM-DD, inclusive' },
+          // The model sends null for filters it doesn't use; Groq rejects that
+          // unless the schema allows it.
+          from: { type: ['string', 'null'], description: 'YYYY-MM-DD, inclusive' },
+          to: { type: ['string', 'null'], description: 'YYYY-MM-DD, inclusive' },
         },
       },
     },
@@ -53,7 +56,7 @@ const TOOLS = [
       description: 'Action items across all recordings, with who, what, due date and the moment they were said.',
       parameters: {
         type: 'object',
-        properties: { status: { type: 'string', enum: ['open', 'done'] } },
+        properties: { status: { type: ['string', 'null'], enum: ['open', 'done', null] } },
       },
     },
   },
@@ -63,7 +66,7 @@ const systemPrompt = (today: string) => `You answer questions about the user's v
 
 Use the tools to find the answer. Base every statement only on what the tools return; never on outside knowledge or guesses.
 
-Cite every fact with a marker right after it, in the form [[RECORDING_ID@SECONDS]], using a recording id and a t= value exactly as a tool returned them. Example: The review moved to Friday [[rec-01_2026-11-05T14-32-10@41.2]].
+Cite every fact with a marker right after it, in the form [[RECORDING_ID@SECONDS]], using a recording id and a t= value exactly as a tool returned them. Example: The review moved to Friday [[rec-01_2026-11-05T14-32-10@41.2]]. For facts about a recording as a whole, such as when it was made or how long it is, cite it at 0.
 
 If the tools don't contain the answer, reply exactly: The recordings don't say.
 
@@ -100,6 +103,8 @@ function runTool(name: string, args: any, ev: Evidence): unknown {
         const day = r.recorded_at.slice(0, 10);
         return (!from || day >= from) && (!to || day <= to);
       });
+      // Facts about a recording as a whole (its date, length) are cited at 0.
+      recs.forEach((r) => note(ev, r.id, 0));
       return recs.map((r) => ({
         id: r.id, recorded_at: r.recorded_at, title: r.title, status: r.status,
         length: fmtClock((r.duration_ms ?? 0) / 1000), summary: getRecording(r.id)?.summary ?? null,
@@ -181,8 +186,12 @@ export async function ask(history: { role: 'user' | 'assistant'; content: string
   for (let step = 0; step < MAX_STEPS; step++) {
     const reply = await chatWithTools({ messages, tools: TOOLS });
     if (!reply.tool_calls?.length) {
-      const raw = (reply.content ?? '').trim() || "The recordings don't say.";
-      return { raw, parts: toParts(raw, ev) };
+      const raw = (reply.content ?? '').trim();
+      const parts = toParts(raw, ev);
+      // An answer with no citation that survived the check has no evidence
+      // behind it, whatever it claims. Refuse instead of passing it on.
+      if (!parts.some((p) => p.type === 'cite')) return { raw: NO_EVIDENCE, parts: [{ type: 'text', text: NO_EVIDENCE }] };
+      return { raw, parts };
     }
     messages.push({ role: 'assistant', content: reply.content, tool_calls: reply.tool_calls });
     for (const call of reply.tool_calls) {
