@@ -2,6 +2,7 @@ import express from 'express';
 import multer from 'multer';
 import { rename, rm } from 'node:fs/promises';
 import { AUDIO_DIR, getRecording, insertRecording } from './db.js';
+import { enqueue, resumeUnfinished } from './ingest.js';
 
 const app = express();
 const upload = multer({ dest: `${AUDIO_DIR}/tmp`, limits: { fileSize: 20 * 1024 * 1024 } });
@@ -56,8 +57,13 @@ app.post('/upload', upload.single('audio'), async (req, res) => {
   insertRecording({ id, device_id, recorded_at, duration_ms, battery_pct, file_path });
   console.log('saved', id, { duration_ms, battery_pct });
 
+  // Answer the device now; transcription happens in the background.
   res.status(201).json({ id, status: 'saved' });
+  enqueue(id);
 });
 
 const port = Number(process.env.PORT) || 8000;
-app.listen(port, '0.0.0.0', () => console.log(`listening on http://0.0.0.0:${port}`));
+app.listen(port, '0.0.0.0', () => {
+  console.log(`listening on http://0.0.0.0:${port}`);
+  resumeUnfinished();
+});
