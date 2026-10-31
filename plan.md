@@ -14,7 +14,8 @@ Software (FDE track) first, then hardware. The Next.js app built here is also th
 | L4 Ask | Built; citations untested until real samples arrive | |
 | L5 Act | Not started | |
 | L6 Honest & live | Partly: honesty safeguards in transcription and extraction; live push not started | |
-| H1–H6 Hardware | Not started | |
+| H1 Board alive | Done | |
+| H2–H6 Hardware | Waiting on mic soldering | |
 
 **Waiting on:** the official `sample-recordings` folder and `manifest.json`. Until then everything is tested with tones, silence and clearly labelled layout placeholders only. No made-up meeting content. **Not yet tested on real speech:** transcription accuracy, extraction quality, date resolution.
 
@@ -85,7 +86,11 @@ Commit after each level (at least once an hour).
 
 ## Phase 2: Hardware
 
-- [ ] **H1** Board alive: LED cycles R/G/B, serial prints `ready`
+Board: ESP32-S3-N16R8 DevKit (16 MB flash, 8 MB PSRAM, onboard WS2812 RGB LED on GPIO 48). Power from the laptop's USB; no power bank, so H6 becomes a USB-powered run.
+
+Flash: `arduino-cli compile --upload -p /dev/cu.usbmodem* --fqbn "esp32:esp32:esp32s3:CDCOnBoot=cdc,PSRAM=opi,FlashSize=16M" firmware/recorder`. If it can't connect: hold BOOT, tap RST, release BOOT, then retry.
+
+- [x] **H1** Board alive: LED cycles R/G/B, serial prints `ready`
 - [ ] **H2** I2S mic → PSRAM buffer → 32-bit to 16-bit conversion → WAV header → file in flash (LittleFS)
 - [ ] **H3** LED state machine (red steady for the whole recording, blue blinking while uploading, green for 2 s, amber while queued, fast red on error)
 - [ ] **H4** NTP time, multipart upload to this server, 201 check
