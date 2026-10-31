@@ -1,6 +1,7 @@
 import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
+import { publish } from './live';
 import type {
   ActionItem, CalendarEvent, DraftProposal, EmailDraft, EventProposal, Mention, RecordingDetail,
   RecordingSummary, SearchHit, Segment, Status,
@@ -150,10 +151,14 @@ export function insertRecording(r: Pick<RecordingRow, 'id' | 'device_id' | 'reco
     INSERT INTO recordings (id, device_id, recorded_at, duration_ms, battery_pct, file_path)
     VALUES (?, ?, ?, ?, ?, ?)
   `).run(r.id, r.device_id, r.recorded_at, r.duration_ms, r.battery_pct, r.file_path);
+  publish({ id: r.id, status: 'received' });
 }
 
 export function setStatus(id: string, status: Status, error: string | null = null) {
   db.prepare('UPDATE recordings SET status = ?, error = ? WHERE id = ?').run(status, error, id);
+  // Every pipeline step ends in a status change, so this is the one place
+  // the dashboard needs to hear about.
+  publish({ id, status });
 }
 
 export function setDuration(id: string, duration_ms: number) {

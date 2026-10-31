@@ -1,25 +1,16 @@
 'use client';
 
 import Link from 'next/link';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useSearchParams } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
 import type { ActionItem, RecordingDetail } from '@/lib/types';
-import { STATUS, fmtClock, fmtDate, fmtShortDay, fmtTime, hasTranscript, isPending } from '@/lib/format';
+import { STATUS, fmtClock, fmtDate, fmtShortDay, fmtTime, hasTranscript } from '@/lib/format';
 import Player, { type PlayerHandle } from './Player';
 
 export default function RecordingView({ rec }: { rec: RecordingDetail }) {
-  const router = useRouter();
   const search = useSearchParams();
   const player = useRef<PlayerHandle>(null);
   const [now, setNow] = useState(0);
-
-  // While the pipeline is still working, re-run the server components every
-  // 3 s. router.refresh() fetches fresh props for this page and the sidebar.
-  useEffect(() => {
-    if (!isPending(rec.status)) return;
-    const timer = setInterval(() => router.refresh(), 3000);
-    return () => clearInterval(timer);
-  }, [rec.status, router]);
 
   // ?t=41&seg=5 from a search result: jump there and highlight the line.
   const t = search.get('t');
