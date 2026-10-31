@@ -1,3 +1,4 @@
+import type Anthropic from '@anthropic-ai/sdk';
 import type { Answer, AnswerPart, Citation, Proposal } from '../types';
 import { fmtClock, fmtTime } from '../format';
 import { checkDraft, checkEvent } from './actions';
@@ -5,7 +6,7 @@ import {
   getActionItems, getMentions, getRecording, getSegments, listAllActionItems, listDrafts, listEvents, listRecordings,
   searchSegmentsAny,
 } from './db';
-import { chatWithTools, type ChatMessage } from './groq';
+import { ask as askClaude, textOf } from './claude';
 
 const MAX_STEPS = 6;
 const NO_EVIDENCE = "The recordings don't say.";
@@ -17,100 +18,79 @@ const SOURCE = {
   required: ['recording_id', 't'],
 };
 
-const TOOLS = [
+const TOOLS: Anthropic.Beta.BetaTool[] = [
   {
-    type: 'function',
-    function: {
-      name: 'search_transcripts',
-      description: 'Full-text search over every transcript line. Returns matching lines with recording id and start time. Try several phrasings or synonyms if the first finds nothing.',
-      parameters: {
-        type: 'object',
-        properties: { query: { type: 'string', description: 'Keywords, e.g. "budget review deadline"' } },
-        required: ['query'],
+    name: 'search_transcripts',
+    description: 'Full-text search over every transcript line. Returns matching lines with recording id and start time. Try several phrasings or synonyms if the first finds nothing.',
+    input_schema: {
+      type: 'object',
+      properties: { query: { type: 'string', description: 'Keywords, e.g. "budget review deadline"' } },
+      required: ['query'],
+    },
+  },
+  {
+    name: 'list_recordings',
+    description: 'List recordings (id, date and time, title, summary), newest first. Optionally only those recorded between two dates.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        // The model sends null for filters it doesn't use; Groq rejects that
+        // unless the schema allows it.
+        from: { type: ['string', 'null'], description: 'YYYY-MM-DD, inclusive' },
+        to: { type: ['string', 'null'], description: 'YYYY-MM-DD, inclusive' },
       },
     },
   },
   {
-    type: 'function',
-    function: {
-      name: 'list_recordings',
-      description: 'List recordings (id, date and time, title, summary), newest first. Optionally only those recorded between two dates.',
-      parameters: {
-        type: 'object',
-        properties: {
-          // The model sends null for filters it doesn't use; Groq rejects that
-          // unless the schema allows it.
-          from: { type: ['string', 'null'], description: 'YYYY-MM-DD, inclusive' },
-          to: { type: ['string', 'null'], description: 'YYYY-MM-DD, inclusive' },
-        },
-      },
+    name: 'get_recording',
+    description: 'One recording in full: summary, action items, meetings, dates, people and the whole timestamped transcript.',
+    input_schema: {
+      type: 'object',
+      properties: { id: { type: 'string' } },
+      required: ['id'],
     },
   },
   {
-    type: 'function',
-    function: {
-      name: 'get_recording',
-      description: 'One recording in full: summary, action items, meetings, dates, people and the whole timestamped transcript.',
-      parameters: {
-        type: 'object',
-        properties: { id: { type: 'string' } },
-        required: ['id'],
-      },
+    name: 'list_action_items',
+    description: 'Action items across all recordings, with who, what, due date and the moment they were said.',
+    input_schema: {
+      type: 'object',
+      properties: { status: { type: ['string', 'null'], enum: ['open', 'done', null] } },
     },
   },
   {
-    type: 'function',
-    function: {
-      name: 'list_action_items',
-      description: 'Action items across all recordings, with who, what, due date and the moment they were said.',
-      parameters: {
-        type: 'object',
-        properties: { status: { type: ['string', 'null'], enum: ['open', 'done', null] } },
+    name: 'list_saved',
+    description: 'Calendar events and email drafts the user has already confirmed, each with the recording moment it came from.',
+    input_schema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'propose_event',
+    description: 'Suggest a calendar event. This saves nothing: the user sees a card and decides. Only for a meeting or deadline actually said in a recording.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        title: { type: 'string' },
+        date: { type: 'string', description: 'YYYY-MM-DD' },
+        start_time: { type: ['string', 'null'], description: 'HH:MM 24-hour, or null if no time was said' },
+        end_time: { type: ['string', 'null'], description: 'HH:MM, or null if no end was said' },
+        attendees: { type: ['array', 'null'], items: { type: 'string' }, description: 'Names as said in the recording' },
+        source: SOURCE,
       },
+      required: ['title', 'date', 'source'],
     },
   },
   {
-    type: 'function',
-    function: {
-      name: 'list_saved',
-      description: 'Calendar events and email drafts the user has already confirmed, each with the recording moment it came from.',
-      parameters: { type: 'object', properties: {} },
-    },
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'propose_event',
-      description: 'Suggest a calendar event. This saves nothing: the user sees a card and decides. Only for a meeting or deadline actually said in a recording.',
-      parameters: {
-        type: 'object',
-        properties: {
-          title: { type: 'string' },
-          date: { type: 'string', description: 'YYYY-MM-DD' },
-          start_time: { type: ['string', 'null'], description: 'HH:MM 24-hour, or null if no time was said' },
-          end_time: { type: ['string', 'null'], description: 'HH:MM, or null if no end was said' },
-          attendees: { type: ['array', 'null'], items: { type: 'string' }, description: 'Names as said in the recording' },
-          source: SOURCE,
-        },
-        required: ['title', 'date', 'source'],
+    name: 'propose_draft',
+    description: 'Suggest an email draft. This saves nothing and never sends: the user sees a card and decides.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        to: { type: 'string', description: 'Recipient name or address as said in the recording' },
+        subject: { type: 'string' },
+        body: { type: 'string' },
+        source: SOURCE,
       },
-    },
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'propose_draft',
-      description: 'Suggest an email draft. This saves nothing and never sends: the user sees a card and decides.',
-      parameters: {
-        type: 'object',
-        properties: {
-          to: { type: 'string', description: 'Recipient name or address as said in the recording' },
-          subject: { type: 'string' },
-          body: { type: 'string' },
-          source: SOURCE,
-        },
-        required: ['to', 'subject', 'body', 'source'],
-      },
+      required: ['to', 'subject', 'body', 'source'],
     },
   },
 ];
@@ -253,15 +233,18 @@ function toParts(raw: string, ev: Evidence): AnswerPart[] {
 export async function ask(history: { role: 'user' | 'assistant'; content: string }[]): Promise<Answer> {
   const ev: Evidence = new Map();
   const proposals: Proposal[] = [];
-  const messages: ChatMessage[] = [
-    { role: 'system', content: systemPrompt(new Date().toISOString().slice(0, 10)) },
-    ...history.slice(-12),
-  ];
+  const system = systemPrompt(new Date().toISOString().slice(0, 10));
+  const messages: Anthropic.Beta.BetaMessageParam[] = history.slice(-12);
 
   for (let step = 0; step < MAX_STEPS; step++) {
-    const reply = await chatWithTools({ messages, tools: TOOLS });
-    if (!reply.tool_calls?.length) {
-      const raw = (reply.content ?? '').trim();
+    const res = await askClaude({ system, messages, tools: TOOLS });
+    // The whole reply goes back into the history unchanged, thinking blocks
+    // included: the API checks that earlier turns were not edited.
+    messages.push({ role: 'assistant', content: res.content });
+    if (res.stop_reason === 'pause_turn') continue;
+    const calls = res.content.filter((b): b is Anthropic.Beta.BetaToolUseBlock => b.type === 'tool_use');
+    if (!calls.length) {
+      const raw = textOf(res).trim();
       const parts = toParts(raw, ev);
       // An answer with no citation that survived the check has no evidence
       // behind it, whatever it claims. Refuse instead of passing it on.
@@ -271,16 +254,15 @@ export async function ask(history: { role: 'user' | 'assistant'; content: string
       }
       return { raw, parts, proposals };
     }
-    messages.push({ role: 'assistant', content: reply.content, tool_calls: reply.tool_calls });
-    for (const call of reply.tool_calls) {
-      let result: unknown;
+    // All results go back in one user message.
+    const results: Anthropic.Beta.BetaToolResultBlockParam[] = calls.map((call) => {
       try {
-        result = runTool(call.function.name, JSON.parse(call.function.arguments || '{}'), ev, proposals);
+        return { type: 'tool_result', tool_use_id: call.id, content: JSON.stringify(runTool(call.name, call.input ?? {}, ev, proposals)) };
       } catch (err) {
-        result = { error: `Tool failed: ${(err as Error).message}` };
+        return { type: 'tool_result', tool_use_id: call.id, is_error: true, content: `Tool failed: ${(err as Error).message}` };
       }
-      messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify(result) });
-    }
+    });
+    messages.push({ role: 'user', content: results });
   }
   const raw = "I couldn't finish looking that up. Try a narrower question.";
   return { raw, parts: [{ type: 'text', text: raw }], proposals: [] };

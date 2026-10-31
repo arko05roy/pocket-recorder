@@ -12,8 +12,8 @@ Software (FDE track) first, then hardware. The Next.js app built here is also th
 | L3 Understand | Done | `ad75e57` |
 | Move to Next.js 16 + TypeScript | Done | `22e9651`, `c959037` |
 | L4 Ask | Built; citations untested until real samples arrive | `c8e4abf` |
-| L5 Act | Built; agent proposals untested until real samples arrive | |
-| L6 Honest & live | Partly: honesty safeguards in transcription, extraction and the agent's evidence check; live push not started | |
+| L5 Act | Built; agent proposals untested until real samples arrive | `e7b0678` |
+| L6 Honest & live | Built: honesty safeguards + evidence check (`3fa1e23`), SSE live push | |
 | H1 Board alive | Done | |
 | H2–H6 Hardware | Waiting on mic soldering | |
 
@@ -28,12 +28,12 @@ Software (FDE track) first, then hardware. The Next.js app built here is also th
 | App | Next.js 16 (App Router) + TypeScript | Route handlers for the API, React for the dashboard, one process |
 | Database | SQLite via built-in `node:sqlite` | One file, synchronous, nothing to compile |
 | Speech to text | Groq Whisper (`whisper-large-v3-turbo`) | Fast; `verbose_json` returns segment timestamps |
-| LLM | Groq `openai/gpt-oss-120b` (override with GROQ_MODEL) | Tool calling for the agent; JSON mode for extraction |
+| LLM | Claude Opus 5.5 via `@anthropic-ai/sdk` (override with CLAUDE_MODEL) | Stronger extraction and rule-following; JSON-schema output for extraction, tool use for the agent; server-side refusal fallback on. Claude takes no audio, so Whisper stays for speech to text |
 | Audio prep | `ffmpeg` | Normalise any input to 16 kHz mono WAV, read duration |
 | Dashboard | React server + client components | Server components read the DB directly |
-| Live updates | Now: `router.refresh()` every 3 s while a recording is processing. L6: Server-Sent Events | New uploads appear without a refresh or restart |
+| Live updates | Server-Sent Events (`/api/stream`) → `router.refresh()` | New uploads and status changes appear without a refresh or restart |
 
-Secrets live in `.env` (gitignored). `.env.example` shows the keys.
+Secrets live in `.env` (gitignored): `GROQ_API_KEY` (Whisper), `ANTHROPIC_API_KEY` (everything else). `.env.example` shows the keys.
 
 ## Folder layout
 
@@ -46,7 +46,7 @@ app/
   r/[id]/page.tsx            recording page (server component)
 components/                  Sidebar, RecordingView, Player (client components)
 lib/types.ts, lib/format.ts  shared by server and browser
-lib/server/                  db, audio, groq, transcribe, analyse, ingest
+lib/server/                  db, audio, groq (Whisper), claude, transcribe, analyse, agent, actions, live, ingest
 instrumentation.ts           resumes unfinished jobs on server start
 scripts/seed.mjs             load sample-recordings + manifest.json via POST /upload
 data/                        app.db + audio files (gitignored)
@@ -79,7 +79,7 @@ Built:
 - [x] **L3 Understand**: `gpt-oss-120b` in JSON mode reads a line-numbered transcript and returns title, summary, action items (who/what/when), meetings, dates, people. Every item must cite an existing line or it is dropped; timestamps come from our segments, never the model; dates validated strictly (rejects 2026-02-30); relative dates resolved against the recording's own date, null when unsure. Action items can be ticked done. On meaningless input it returns nothing.
 - [ ] **L4 Ask** (built, needs real samples to verify citations): `/ask` chat page. Groq tool-calling loop (max 6 steps) over four read-only tools: `search_transcripts` (FTS, any word), `list_recordings` (date range), `get_recording` (full transcript + extraction), `list_action_items`. The model cites with `[[id@seconds]]`; the server keeps only citations within 1.5 s of a moment a tool returned, snaps them to it, and renders `recording · date · mm:ss` chips that open the recording at that second. Made-up citations are dropped.
 - [ ] **L5 Act** (built, needs real samples to verify the agent side): `propose_event` / `propose_draft` tools validate and return a proposal but write nothing; the chat shows a Confirm/Cancel card. Every proposal must cite a moment a tool returned. Confirm POSTs to `/api/events` or `/api/drafts`, which re-check everything (real date, end after start, source within 1.5 s of a real moment in that recording) because the browser is untrusted too. `/calendar` (grouped by day, delete) and `/drafts` (copy, delete). Nothing sends email. The agent can read saved items via `list_saved`. Validators shared in `lib/server/validate.ts`.
-- [ ] **L6 Honest & live** (honesty done; live push still to do): the system prompt plus a server check: an answer with no citation that survived validation is replaced with "The recordings don't say." `list_recordings` records each recording at t=0 so whole-recording facts can be cited. Known limits: one valid citation lets the whole answer through; an empty DB and clarifying questions also get the refusal. SSE pushes new uploads and status changes to the dashboard (not started).
+- [x] **L6 Honest & live**: the system prompt plus a server check: an answer with no citation that survived validation is replaced with "The recordings don't say." `list_recordings` records each recording at t=0 so whole-recording facts can be cited. Known limits: one valid citation lets the whole answer through; an empty DB and clarifying questions also get the refusal. Live: `insertRecording` and `setStatus` publish to an in-process bus (`lib/server/live.ts`, on `globalThis`); `GET /api/stream` sends each change as an SSE line, with a 2 KB pad (Safari buffers the first 1 KB) and a 25 s heartbeat; it unsubscribes on disconnect. The browser debounces changes into one `router.refresh()` and refreshes once after a reconnect to catch missed changes. The 3 s polling is gone. Tested: all five status changes arrive within ~0.5 s of upload; a retried upload emits nothing.
 
 Commit after each level (at least once an hour).
 
@@ -104,7 +104,8 @@ Upload runs on a separate FreeRTOS task so it never blocks recording.
 - Wrong WAV header makes the voice too fast or slow: verify with Audacity.
 - ESP32 needs a 2.4 GHz hotspot; allow port 8000 through the macOS firewall.
 - Test questions include ones with no answer, so honesty is scored. Test those explicitly.
-- Groq retires models (Llama 3.3 was already gone). The model is set by `GROQ_MODEL` in `.env`; check the account's model list the day before.
+- Groq retires models (Llama 3.3 was already gone); we now only use it for Whisper. The Claude model is set by `CLAUDE_MODEL` in `.env`.
+- Claude answers take ~3–6 s per question (several tool rounds). Fine for a demo; watch it on the real samples.
 - `silencedetect` measures loudness, not speech: Whisper inventing text over loud background noise would still get through. Check on the real samples.
 
 ## Lessons so far

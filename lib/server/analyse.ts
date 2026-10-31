@@ -1,4 +1,4 @@
-import { chatJson } from './groq';
+import { ask, textOf } from './claude';
 import { date, str, time } from './validate';
 import type { Analysis } from './db';
 import type { Mention, Segment } from '../types';
@@ -26,6 +26,25 @@ Return JSON with exactly this shape:
 }
 "meetings" are planned meetings or calls. "dates" are other dates mentioned: deadlines, deliveries, events.`;
 
+const nullable = (type: string) => ({ type: [type, 'null'] });
+const item = (props: Record<string, object>) => ({
+  type: 'object', properties: { ...props, line: { type: 'integer' } },
+  required: [...Object.keys(props), 'line'], additionalProperties: false,
+});
+const SCHEMA = {
+  type: 'object',
+  properties: {
+    title: { type: 'string' },
+    summary: { type: 'string' },
+    action_items: { type: 'array', items: item({ who: nullable('string'), what: { type: 'string' }, due_text: nullable('string'), due_date: nullable('string') }) },
+    meetings: { type: 'array', items: item({ what: { type: 'string' }, when_text: { type: 'string' }, date: nullable('string'), time: nullable('string') }) },
+    dates: { type: 'array', items: item({ what: { type: 'string' }, when_text: { type: 'string' }, date: nullable('string') }) },
+    people: { type: 'array', items: item({ name: { type: 'string' }, role: nullable('string') }) },
+  },
+  required: ['title', 'summary', 'action_items', 'meetings', 'dates', 'people'],
+  additionalProperties: false,
+};
+
 const fmt = (s: number) => `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
 
 export async function analyse(recording: { recorded_at: string }, segments: Segment[]) {
@@ -36,12 +55,15 @@ export async function analyse(recording: { recorded_at: string }, segments: Segm
     weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC',
   });
   const transcript = segments.map((s) => `[${s.idx}] ${fmt(s.start_s)} ${s.text}`).join('\n');
-  const raw = await chatJson({
+  const res = await ask({
+    system: SYSTEM,
     messages: [
-      { role: 'system', content: SYSTEM },
       { role: 'user', content: `Recorded: ${day}, at ${recording.recorded_at.slice(11, 16)} (${recording.recorded_at})\n\nTranscript:\n${transcript}` },
     ],
+    // The API holds the reply to this shape. clean() still checks every field.
+    output_config: { format: { type: 'json_schema', schema: SCHEMA } },
   });
+  const raw = JSON.parse(textOf(res));
   return clean(raw, segments);
 }
 
