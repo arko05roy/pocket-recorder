@@ -1,17 +1,17 @@
 # Pocket Recorder: Plan
 
-Software (FDE track) first, then hardware. The Node server built here is also the upload target for the ESP32 later.
+Software (FDE track) first, then hardware. The Next.js app built here is also the upload target for the ESP32 later.
 
 ## Stack
 
 | Piece | Choice | Why |
 |---|---|---|
-| Server | Node 20+, Express | Familiar; multer handles `multipart/form-data` |
-| Database | SQLite via `better-sqlite3` | One file, synchronous, zero setup |
+| App | Next.js 16 (App Router) + TypeScript | Route handlers for the API, React for the dashboard, one process |
+| Database | SQLite via built-in `node:sqlite` | One file, synchronous, nothing to compile |
 | Speech to text | Groq Whisper (`whisper-large-v3-turbo`) | Fast; `verbose_json` returns segment timestamps |
 | LLM | Groq `openai/gpt-oss-120b` (override with GROQ_MODEL) | Tool calling for the agent; JSON mode for extraction |
 | Audio prep | `ffmpeg` | Normalise any input to 16 kHz mono WAV, read duration |
-| Dashboard | Static HTML + vanilla JS served by Express | No build step, easy to explain |
+| Dashboard | React server + client components | Server components read the DB directly |
 | Live updates | Server-Sent Events (`/events`) | New uploads appear without a refresh or restart |
 
 Secrets live in `.env` (gitignored). `.env.example` shows the keys.
@@ -19,19 +19,19 @@ Secrets live in `.env` (gitignored). `.env.example` shows the keys.
 ## Folder layout
 
 ```
-server/
-  index.js          Express app, routes
-  db.js             schema + queries
-  ingest.js         save file → transcribe → analyse pipeline (job queue)
-  transcribe.js     Groq Whisper call
-  analyse.js        summary / action items / dates / people (JSON mode)
-  agent.js          chat loop with tools
-  tools.js          search_transcripts, get_recording, list_action_items,
-                    create_calendar_event, draft_email
-public/             dashboard (index.html, app.js, style.css)
-scripts/seed.js     load sample-recordings + manifest.json
-data/               app.db + audio files (gitignored)
-firmware/           ESP32 sketch (hardware phase)
+app/
+  upload/route.ts            POST /upload (the hand-off contract)
+  health/route.ts            GET /health
+  api/...                    recordings, audio (range requests), search, action items
+  layout.tsx, page.tsx       shell + home
+  r/[id]/page.tsx            recording page (server component)
+components/                  Sidebar, RecordingView, Player (client components)
+lib/types.ts, lib/format.ts  shared by server and browser
+lib/server/                  db, audio, groq, transcribe, analyse, ingest
+instrumentation.ts           resumes unfinished jobs on server start
+scripts/seed.mjs             load sample-recordings + manifest.json via POST /upload
+data/                        app.db + audio files (gitignored)
+firmware/                    ESP32 sketch (hardware phase)
 ```
 
 ## Data model

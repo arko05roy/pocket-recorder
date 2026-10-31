@@ -1,4 +1,6 @@
-import { chatJson } from './groq.js';
+import { chatJson } from './groq';
+import type { Analysis } from './db';
+import type { Mention, Segment } from '../types';
 
 const SYSTEM = `You read meeting transcripts for a busy founder and extract what they need to act on.
 
@@ -23,9 +25,9 @@ Return JSON with exactly this shape:
 }
 "meetings" are planned meetings or calls. "dates" are other dates mentioned: deadlines, deliveries, events.`;
 
-const fmt = (s) => `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
+const fmt = (s: number) => `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
 
-export async function analyse(recording, segments) {
+export async function analyse(recording: { recorded_at: string }, segments: Segment[]) {
   // The weekday of the device's own calendar date, so "Thursday" resolves
   // the way the speaker meant it, whatever zone this server runs in.
   const [y, m, d] = recording.recorded_at.slice(0, 10).split('-').map(Number);
@@ -47,45 +49,46 @@ export async function analyse(recording, segments) {
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 const TIME = /^([01]\d|2[0-3]):[0-5]\d$/;
 
-const str = (v, max = 500) => (typeof v === 'string' && v.trim() ? v.trim().slice(0, max) : null);
+const str = (v: unknown, max = 500): string | null => (typeof v === 'string' && v.trim() ? v.trim().slice(0, max) : null);
 // Date.parse quietly rolls 2026-02-30 over to March 2, so check the date
 // survives a round trip unchanged.
-const date = (v) => {
+const date = (v: unknown): string | null => {
   if (typeof v !== 'string' || !DATE.test(v)) return null;
   const d = new Date(`${v}T00:00:00Z`);
-  return !isNaN(d) && d.toISOString().slice(0, 10) === v ? v : null;
+  return !isNaN(d.getTime()) && d.toISOString().slice(0, 10) === v ? v : null;
 };
-const time = (v) => (typeof v === 'string' && TIME.test(v) ? v : null);
-const list = (v) => (Array.isArray(v) ? v : []);
+const time = (v: unknown): string | null => (typeof v === 'string' && TIME.test(v) ? v : null);
+const list = (v: unknown): any[] => (Array.isArray(v) ? v : []);
 
 // Keep an item only if it cites a line that exists. The timestamp always
 // comes from our own segment, never from the model.
-export function clean(raw, segments) {
+export function clean(raw: any, segments: Segment[]): Analysis & { dropped: number } {
   const byIdx = new Map(segments.map((s) => [s.idx, s]));
-  const cite = (item) => byIdx.get(Number(item?.line));
+  const cite = (item: any) => byIdx.get(Number(item?.line));
   let dropped = 0;
-  const keep = (items, build) => list(items).flatMap((item) => {
+  const keep = <T,>(items: unknown, build: (item: any) => T | null | false | '') =>
+    list(items).flatMap((item): (T & { source_s: number })[] => {
     const seg = cite(item);
     const out = seg && build(item);
     if (!out) { dropped++; return []; }
     return [{ ...out, source_s: seg.start_s }];
   });
 
-  const result = {
+  const result: Analysis = {
     title: str(raw?.title, 80),
     summary: str(raw?.summary, 1200),
     action_items: keep(raw?.action_items, (i) => str(i.what) && {
-      who: str(i.who, 80), what: str(i.what), due_text: str(i.due_text, 80), due_date: date(i.due_date),
+      who: str(i.who, 80), what: str(i.what)!, due_text: str(i.due_text, 80), due_date: date(i.due_date),
     }),
     mentions: [
       ...keep(raw?.meetings, (i) => str(i.what) && {
-        kind: 'meeting', value: str(i.what), detail: str(i.when_text, 80), date: date(i.date), time: time(i.time),
+        kind: 'meeting' as const, value: str(i.what)!, detail: str(i.when_text, 80), date: date(i.date), time: time(i.time),
       }),
       ...keep(raw?.dates, (i) => str(i.what) && {
-        kind: 'date', value: str(i.what), detail: str(i.when_text, 80), date: date(i.date), time: null,
+        kind: 'date' as const, value: str(i.what)!, detail: str(i.when_text, 80), date: date(i.date), time: null,
       }),
       ...dedupePeople(keep(raw?.people, (i) => str(i.name, 80) && {
-        kind: 'person', value: str(i.name, 80), detail: str(i.role, 80), date: null, time: null,
+        kind: 'person' as const, value: str(i.name, 80)!, detail: str(i.role, 80), date: null, time: null,
       })),
     ],
   };
@@ -93,8 +96,8 @@ export function clean(raw, segments) {
 }
 
 // The same person is often mentioned several times; keep the first mention.
-function dedupePeople(people) {
-  const seen = new Set();
+function dedupePeople(people: Mention[]) {
+  const seen = new Set<string>();
   return people.filter((p) => {
     const key = p.value.toLowerCase();
     if (seen.has(key)) return false;

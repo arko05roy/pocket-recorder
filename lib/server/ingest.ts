@@ -1,17 +1,19 @@
 import { rm } from 'node:fs/promises';
-import { normalise, probeDurationMs, soundRanges } from './audio.js';
-import { transcribe } from './transcribe.js';
-import { analyse } from './analyse.js';
+import { normalise, probeDurationMs, soundRanges } from './audio';
+import { transcribe } from './transcribe';
+import { analyse } from './analyse';
 import {
   getRecording, getSegments, saveAnalysis, saveSegments, setDuration, setStatus, unfinishedRecordingIds,
-} from './db.js';
+  type RecordingRow,
+} from './db';
 
 // One job at a time: keeps us under Groq's rate limits and keeps logs readable.
-const queue = [];
-let running = false;
+// Lives on globalThis so every Next.js bundle shares the same queue.
+const g = globalThis as unknown as { __ingest?: { queue: string[]; running: boolean } };
+const state = (g.__ingest ??= { queue: [], running: false });
 
-export function enqueue(id) {
-  if (!queue.includes(id)) queue.push(id);
+export function enqueue(id: string) {
+  if (!state.queue.includes(id)) state.queue.push(id);
   drain();
 }
 
@@ -21,21 +23,22 @@ export function resumeUnfinished() {
 }
 
 async function drain() {
-  if (running) return;
-  running = true;
-  while (queue.length) {
-    const id = queue.shift();
+  if (state.running) return;
+  state.running = true;
+  while (state.queue.length) {
+    const id = state.queue.shift()!;
     try {
       await processRecording(id);
     } catch (err) {
-      console.error('ingest failed', id, err.message);
-      setStatus(id, 'error', err.message);
+      const message = err instanceof Error ? err.message : String(err);
+      console.error('ingest failed', id, message);
+      setStatus(id, 'error', message);
     }
   }
-  running = false;
+  state.running = false;
 }
 
-async function processRecording(id) {
+async function processRecording(id: string) {
   const rec = getRecording(id);
   if (!rec) return;
 
@@ -57,7 +60,7 @@ async function processRecording(id) {
   console.log('ready', id);
 }
 
-async function transcribeRecording(rec) {
+async function transcribeRecording(rec: RecordingRow) {
   const id = rec.id;
   setStatus(id, 'transcribing');
   const clean = rec.file_path.replace(/\.wav$/, '.16k.wav');
@@ -82,7 +85,13 @@ const MIN_OVERLAP_S = 0.2;
 
 // Clamp timestamps to the real clip length, then keep a segment only if it has
 // actual words and overlaps audible sound.
-export function keepRealSpeech(segments, sound, durationS) {
+type RawSegment = { start: number; end: number; text: string };
+
+export function keepRealSpeech(
+  segments: RawSegment[],
+  sound: { start: number; end: number }[],
+  durationS: number,
+): RawSegment[] {
   return segments
     .map((s) => ({ ...s, start: Math.min(s.start, durationS), end: Math.min(s.end, durationS) }))
     .filter((s) => /\p{L}|\p{N}/u.test(s.text))

@@ -1,15 +1,23 @@
 // Load a folder of recordings described by manifest.json into the running server.
-// Usage: node scripts/seed.js <folder> [server-url]
+// Usage: npm run seed <folder> [server-url]
 //
 // It uploads through POST /upload, the same contract the ESP32 uses, so the
 // seed path and the device path can never drift apart.
 import { readFile } from 'node:fs/promises';
 import { join, basename } from 'node:path';
-import { probeDurationMs } from '../server/audio.js';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+
+const run = promisify(execFile);
+
+async function probeDurationMs(path) {
+  const { stdout } = await run('ffprobe', ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', path]);
+  return Math.round(parseFloat(stdout) * 1000);
+}
 
 const [folder, server = 'http://localhost:8000'] = process.argv.slice(2);
 if (!folder) {
-  console.error('usage: node scripts/seed.js <folder> [server-url]');
+  console.error('usage: npm run seed <folder> [server-url]');
   process.exit(1);
 }
 

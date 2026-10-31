@@ -9,8 +9,8 @@
   --mark: #FBF3DB;
   --rec: #D93A2B;       /* the recorder's LED red: playhead and current line only */
   --rec-soft: #FCEDEB;
-  --font: "Geist", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
-  --mono: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --font: var(--font-geist), ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
 * { box-sizing: border-box; }
@@ -23,6 +23,7 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 button { font: inherit; color: inherit; }
+a { color: inherit; text-decoration: none; }
 :focus-visible { outline: 2px solid #2383E2; outline-offset: 2px; border-radius: 4px; }
 .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
 mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1px; }
@@ -73,7 +74,7 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1
   border: 0; border-radius: 6px; background: none; cursor: pointer;
 }
 .item:hover { background: var(--hover); }
-.item[aria-current="true"] { background: var(--hover); }
+.item[aria-current="page"] { background: var(--hover); }
 .item .time { font: 12.5px/1.75 var(--mono); color: var(--muted); grid-row: span 2; }
 .item .title { font-size: 14px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .item .sub { font-size: 13px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

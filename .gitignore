@@ -6,3 +6,6 @@ recordings/
 *.db
 .DS_Store
 pocket-recorder-challenge.html
+.next/
+next-env.d.ts
+*.tsbuildinfo

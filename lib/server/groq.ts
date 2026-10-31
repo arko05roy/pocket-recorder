@@ -1,11 +1,15 @@
 const BASE = 'https://api.groq.com/openai/v1';
 const MAX_ATTEMPTS = 4;
 
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 // fetch() against Groq with the API key added and retries on 429 / 5xx.
 // makeBody is a function because a FormData body can only be sent once.
-export async function groqFetch(path, makeBody, headers = {}) {
+export async function groqFetch(
+  path: string,
+  makeBody: () => BodyInit,
+  headers: Record<string, string> = {},
+): Promise<any> {
   if (!process.env.GROQ_API_KEY) throw new Error('GROQ_API_KEY is not set');
 
   for (let attempt = 1; ; attempt++) {
@@ -28,10 +32,17 @@ export async function groqFetch(path, makeBody, headers = {}) {
   }
 }
 
+export interface ChatMessage {
+  role: 'system' | 'user' | 'assistant' | 'tool';
+  content: string | null;
+  tool_calls?: unknown[];
+  tool_call_id?: string;
+}
+
 // Groq retires models; override with GROQ_MODEL in .env without a code change.
 export const CHAT_MODEL = process.env.GROQ_MODEL || 'openai/gpt-oss-120b';
 
-export async function chatJson({ model = CHAT_MODEL, messages }) {
+export async function chatJson({ model = CHAT_MODEL, messages }: { model?: string; messages: ChatMessage[] }) {
   const body = await groqFetch('/chat/completions', () => JSON.stringify({
     model,
     messages,
