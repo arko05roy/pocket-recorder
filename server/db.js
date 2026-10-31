@@ -90,6 +90,42 @@ export function getSegments(recordingId) {
   ).all(recordingId);
 }
 
+export function listRecordings() {
+  return db.prepare(`
+    SELECT r.id, r.device_id, r.recorded_at, r.duration_ms, r.battery_pct, r.status, r.error,
+           (SELECT text FROM segments WHERE recording_id = r.id ORDER BY idx LIMIT 1) AS preview,
+           (SELECT count(*) FROM segments WHERE recording_id = r.id) AS segment_count
+    FROM recordings r
+    ORDER BY r.recorded_at DESC
+  `).all();
+}
+
+// Turn what the user typed into a safe FTS5 query: every word is quoted (so
+// characters like - or " can't break the syntax) and the last word matches as
+// a prefix, so results appear while typing.
+function ftsQuery(input) {
+  const words = input.match(/[\p{L}\p{N}]+/gu) ?? [];
+  return words.map((w, i) => (i === words.length - 1 ? `"${w}"*` : `"${w}"`)).join(' ');
+}
+
+// \u0002 and \u0003 mark the matched words. The browser escapes the text first
+// and then turns these markers into <mark>, so transcript text never becomes HTML.
+export function searchSegments(input, limit = 50) {
+  const query = ftsQuery(input);
+  if (!query) return [];
+  return db.prepare(`
+    SELECT s.recording_id, s.idx, s.start_s, s.end_s,
+           snippet(segments_fts, 0, char(2), char(3), '…', 14) AS snippet,
+           r.recorded_at, r.device_id
+    FROM segments_fts
+    JOIN segments s   ON s.id = segments_fts.rowid
+    JOIN recordings r ON r.id = s.recording_id
+    WHERE segments_fts MATCH ?
+    ORDER BY rank
+    LIMIT ?
+  `).all(query, limit);
+}
+
 // Recordings left mid-pipeline by a crash or restart.
 export function unfinishedRecordingIds() {
   return db.prepare(

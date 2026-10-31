@@ -1,7 +1,10 @@
 import express from 'express';
 import multer from 'multer';
 import { rename, rm } from 'node:fs/promises';
-import { AUDIO_DIR, getRecording, insertRecording } from './db.js';
+import { resolve } from 'node:path';
+import {
+  AUDIO_DIR, getRecording, getSegments, insertRecording, listRecordings, searchSegments,
+} from './db.js';
 import { enqueue, resumeUnfinished } from './ingest.js';
 
 const app = express();
@@ -21,7 +24,30 @@ function optionalInt(value) {
   return Number.isInteger(n) ? n : NaN;
 }
 
+app.use(express.static('public'));
+
 app.get('/health', (req, res) => res.json({ ok: true }));
+
+app.get('/api/recordings', (req, res) => res.json(listRecordings()));
+
+app.get('/api/recordings/:id', (req, res) => {
+  const rec = getRecording(req.params.id);
+  if (!rec) return res.status(404).json({ error: 'recording not found' });
+  const { file_path, ...rest } = rec; // don't expose server paths
+  res.json({ ...rest, segments: getSegments(rec.id) });
+});
+
+// sendFile supports HTTP Range requests, which the <audio> element needs to seek.
+app.get('/api/recordings/:id/audio', (req, res) => {
+  const rec = getRecording(req.params.id);
+  if (!rec) return res.status(404).json({ error: 'recording not found' });
+  res.sendFile(resolve(rec.file_path));
+});
+
+app.get('/api/search', (req, res) => {
+  const q = String(req.query.q ?? '').slice(0, 200);
+  res.json(searchSegments(q));
+});
 
 app.post('/upload', upload.single('audio'), async (req, res) => {
   const file = req.file;
