@@ -242,6 +242,36 @@ export function searchSegments(input: string, limit = 50) {
   `).all(query, limit).map(plain<SearchHit>);
 }
 
+// For the agent: any word may match (OR), best matches first, full line text
+// plus enough about the recording to cite it.
+export function searchSegmentsAny(input: string, limit = 20) {
+  const words = input.match(/[\p{L}\p{N}]+/gu) ?? [];
+  if (!words.length) return [];
+  return db.prepare(`
+    SELECT s.recording_id, s.idx, s.start_s, s.text, r.recorded_at, r.title
+    FROM segments_fts
+    JOIN segments s   ON s.id = segments_fts.rowid
+    JOIN recordings r ON r.id = s.recording_id
+    WHERE segments_fts MATCH ?
+    ORDER BY rank
+    LIMIT ?
+  `).all(words.map((w) => `"${w}"`).join(' OR '), limit).map(plain<{
+    recording_id: string; idx: number; start_s: number; text: string; recorded_at: string; title: string | null;
+  }>);
+}
+
+export function listAllActionItems(status?: 'open' | 'done') {
+  return db.prepare(`
+    SELECT a.id, a.recording_id, a.who, a.what, a.due_text, a.due_date, a.source_s, a.status,
+           r.recorded_at, r.title
+    FROM action_items a JOIN recordings r ON r.id = a.recording_id
+    WHERE ? IS NULL OR a.status = ?
+    ORDER BY r.recorded_at, a.source_s
+  `).all(status ?? null, status ?? null).map(plain<ActionItem & {
+    recording_id: string; recorded_at: string; title: string | null;
+  }>);
+}
+
 // Recordings left mid-pipeline by a crash or restart.
 export function unfinishedRecordingIds() {
   return db.prepare(

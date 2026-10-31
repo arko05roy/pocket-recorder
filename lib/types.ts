@@ -56,6 +56,23 @@ export interface RecordingDetail {
   mentions: Mention[];
 }
 
+// A moment in a recording that an answer points to. Only built by the server
+// from evidence a tool returned, never taken from the model as-is.
+export interface Citation {
+  recording_id: string;
+  label: string;        // recording title, or device + time when there is none
+  recorded_at: string;
+  start_s: number;
+}
+
+export type AnswerPart = { type: 'text'; text: string } | { type: 'cite'; cite: Citation };
+
+export interface Answer {
+  parts: AnswerPart[];
+  // The model's raw reply, sent back as history on the next question.
+  raw: string;
+}
+
 export interface SearchHit {
   recording_id: string;
   idx: number;

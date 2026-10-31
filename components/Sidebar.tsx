@@ -70,6 +70,7 @@ export default function Sidebar({ recordings }: { recordings: RecordingSummary[]
         />
         <kbd>/</kbd>
       </label>
+      <Link href="/ask" className="ask-link" aria-current={pathname === '/ask' ? 'page' : undefined}>Ask the recordings</Link>
       <nav className="list" aria-label="Recordings">
         {results ? <Results results={results} query={query.trim()} /> : <ByDay recordings={recordings} currentId={currentId} />}
       </nav>

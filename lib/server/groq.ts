@@ -42,6 +42,28 @@ export interface ChatMessage {
 // Groq retires models; override with GROQ_MODEL in .env without a code change.
 export const CHAT_MODEL = process.env.GROQ_MODEL || 'openai/gpt-oss-120b';
 
+export interface ToolCall {
+  id: string;
+  type: 'function';
+  function: { name: string; arguments: string };
+}
+
+// One chat turn with tools available. Returns the assistant message, which
+// holds either tool_calls to run or the final text in content.
+export async function chatWithTools({ model = CHAT_MODEL, messages, tools }: {
+  model?: string; messages: ChatMessage[]; tools: unknown[];
+}): Promise<{ content: string | null; tool_calls?: ToolCall[] }> {
+  const body = await groqFetch('/chat/completions', () => JSON.stringify({
+    model,
+    messages,
+    tools,
+    tool_choice: 'auto',
+    temperature: 0,
+  }), { 'Content-Type': 'application/json' });
+  const { content, tool_calls } = body.choices[0].message;
+  return { content, tool_calls };
+}
+
 export async function chatJson({ model = CHAT_MODEL, messages }: { model?: string; messages: ChatMessage[] }) {
   const body = await groqFetch('/chat/completions', () => JSON.stringify({
     model,

@@ -11,7 +11,7 @@ Software (FDE track) first, then hardware. The Next.js app built here is also th
 | L2 Dashboard | Done | `9226a1a` |
 | L3 Understand | Done | `ad75e57` |
 | Move to Next.js 16 + TypeScript | Done | `22e9651`, `c959037` |
-| L4 Ask | **Next** | |
+| L4 Ask | Built; citations untested until real samples arrive | |
 | L5 Act | Not started | |
 | L6 Honest & live | Partly: honesty safeguards in transcription and extraction; live push not started | |
 | H1–H6 Hardware | Not started | |
@@ -77,7 +77,7 @@ To build (L5):
 - [x] **L1 Transcribe**: background queue (one job at a time, resumes unfinished work on start) → ffmpeg normalise → Groq Whisper `verbose_json` → segments in SQLite. Whisper invents text on silence ("Thank you."), so segments are checked against ffmpeg `silencedetect`, clamped to the clip length, and punctuation-only ones dropped. Retries on 429/5xx with backoff. `npm run seed <folder>` loads samples through `POST /upload`.
 - [x] **L2 Dashboard**: Notion-style UI. Recordings grouped by day; transcript with click-to-seek; scrub bar showing a tick per segment; current line followed during playback; FTS5 search (input quoted so it can't break the query, prefix match on the last word) whose results open at the matched moment. Audio served with HTTP Range (206/416). Mobile layout switches between list and recording.
 - [x] **L3 Understand**: `gpt-oss-120b` in JSON mode reads a line-numbered transcript and returns title, summary, action items (who/what/when), meetings, dates, people. Every item must cite an existing line or it is dropped; timestamps come from our segments, never the model; dates validated strictly (rejects 2026-02-30); relative dates resolved against the recording's own date, null when unsure. Action items can be ticked done. On meaningless input it returns nothing.
-- [ ] **L4 Ask**: chat panel; agent uses tools; every answer cites `recording · date · mm:ss`, and citations are clickable
+- [ ] **L4 Ask** (built, needs real samples to verify citations): `/ask` chat page. Groq tool-calling loop (max 6 steps) over four read-only tools: `search_transcripts` (FTS, any word), `list_recordings` (date range), `get_recording` (full transcript + extraction), `list_action_items`. The model cites with `[[id@seconds]]`; the server keeps only citations within 1.5 s of a moment a tool returned, snaps them to it, and renders `recording · date · mm:ss` chips that open the recording at that second. Made-up citations are dropped.
 - [ ] **L5 Act**: calendar view + drafts list; the agent *proposes* an event or draft, the UI shows a Confirm/Cancel card, and only Confirm writes it. Emails are never sent.
 - [ ] **L6 Honest & live** (honesty in extraction already done; agent and live push still to do): the system prompt plus a check that tools returned evidence; with no evidence the agent replies "The recordings don't say." SSE pushes new uploads and status changes to the dashboard.
 

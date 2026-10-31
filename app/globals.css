@@ -210,3 +210,22 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1
   .rows li { grid-template-columns: minmax(0, 1fr) auto; }
   .rows .when { grid-column: 1 / -1; padding: 0; }
 }
+
+/* Ask */
+.ask-link { display: block; margin: 0 12px 6px; padding: 5px 8px; border-radius: 6px; font-size: 14px; color: var(--ink); text-decoration: none; }
+.ask-link:hover, .ask-link[aria-current="page"] { background: var(--hover); }
+.chat .turns { display: grid; gap: 14px; margin: 18px 0 24px; }
+.chat .q { margin: 0; justify-self: end; max-width: 80%; padding: 7px 12px; border-radius: 10px; background: var(--side); }
+.chat .a { margin: 0; max-width: 62ch; line-height: 1.7; white-space: pre-wrap; }
+.chat .a.pending { color: var(--muted); }
+.chat .a.error { color: #9F2A1F; }
+.cite {
+  display: inline-block; margin: 0 2px; padding: 0 6px; border: 1px solid var(--line); border-radius: 4px;
+  font: 12px/1.7 var(--mono); color: var(--muted); text-decoration: none; white-space: nowrap; vertical-align: 1px;
+}
+.cite:hover { color: var(--rec); border-color: #F0C6C1; background: var(--rec-soft); }
+.ask { position: sticky; bottom: 16px; display: flex; gap: 8px; padding: 6px; border: 1px solid var(--line); border-radius: 10px; background: var(--paper); }
+.ask input { flex: 1; min-width: 0; border: 0; outline: 0; font: inherit; padding: 4px 6px; background: none; color: var(--ink); }
+.ask button { border: 0; border-radius: 6px; padding: 5px 14px; font: inherit; font-size: 14px; background: var(--ink); color: var(--paper); cursor: pointer; }
+.ask button:disabled { opacity: .35; cursor: default; }
+@media (max-width: 760px) { .cite { white-space: normal; } }
