@@ -2,7 +2,7 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { listEvents } from '@/lib/server/db';
 import { fmtDate } from '@/lib/format';
-import { Cite } from '@/components/Chat';
+import { Cite } from '@/components/Answer';
 import { DeleteButton } from '@/components/SavedActions';
 
 export const metadata: Metadata = { title: 'Calendar' };
@@ -30,7 +30,7 @@ export default function CalendarPage() {
   }
   return (
     <div className="doc">
-      <Link href="/" className="back">‹ All recordings</Link>
+      <Link href="/recordings" className="back">‹ All recordings</Link>
       <h1>Calendar</h1>
       {rows.length ? rows : <p className="none">No events yet. Ask to add a meeting from a recording, then confirm it.</p>}
     </div>

@@ -1,8 +1,6 @@
-import type { Metadata } from 'next';
-import Chat from '@/components/Chat';
+import { redirect } from 'next/navigation';
 
-export const metadata: Metadata = { title: 'Ask' };
-
-export default function AskPage() {
-  return <Chat />;
+// Recording and asking both live in the chat on the home page now.
+export default function Page() {
+  redirect('/');
 }

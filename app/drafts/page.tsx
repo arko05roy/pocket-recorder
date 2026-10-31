@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { listDrafts } from '@/lib/server/db';
-import { Cite } from '@/components/Chat';
+import { Cite } from '@/components/Answer';
 import { CopyButton, DeleteButton } from '@/components/SavedActions';
 
 export const metadata: Metadata = { title: 'Drafts' };
@@ -11,7 +11,7 @@ export default function DraftsPage() {
   const drafts = listDrafts();
   return (
     <div className="doc">
-      <Link href="/" className="back">‹ All recordings</Link>
+      <Link href="/recordings" className="back">‹ All recordings</Link>
       <h1>Drafts</h1>
       <p className="none">Drafts are never sent. Copy one into your mail app to send it yourself.</p>
       {drafts.length ? drafts.map((d) => (

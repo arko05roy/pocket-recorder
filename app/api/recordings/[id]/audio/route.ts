@@ -8,7 +8,7 @@ import { getRecording } from '@/lib/server/db';
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const rec = getRecording(id);
-  if (!rec) return Response.json({ error: 'recording not found' }, { status: 404 });
+  if (!rec?.file_path) return Response.json({ error: 'recording not found' }, { status: 404 });
 
   const size = (await stat(rec.file_path)).size;
   const headers = { 'Content-Type': 'audio/wav', 'Accept-Ranges': 'bytes' };

@@ -3,7 +3,7 @@ import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { publish } from './live';
 import type {
-  ActionItem, CalendarEvent, DraftProposal, EmailDraft, EventProposal, Mention, RecordingDetail,
+  ActionItem, CalendarEvent, DraftProposal, GraphEdge, GraphNode, NodeProfile, EmailDraft, EventProposal, Mention, RecordingDetail,
   RecordingSummary, SearchHit, Segment, Status,
 } from '../types';
 
@@ -105,6 +105,46 @@ function open() {
       source_recording_id TEXT NOT NULL REFERENCES recordings(id) ON DELETE CASCADE,
       source_s            REAL NOT NULL,
       created_at          TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    -- A chat thread (voice turns, questions, answers, live cards), stored as
+    -- JSON: it is only ever read and written whole, by the chat page.
+    CREATE TABLE IF NOT EXISTS chats (
+      id         TEXT PRIMARY KEY,
+      title      TEXT NOT NULL DEFAULT 'New chat',
+      data       TEXT NOT NULL DEFAULT '[]',
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    -- The knowledge graph: everyone and everything mentioned, across all
+    -- chats. A node is unique by its lower-cased name.
+    CREATE TABLE IF NOT EXISTS graph_nodes (
+      id         INTEGER PRIMARY KEY,
+      key        TEXT NOT NULL UNIQUE,
+      name       TEXT NOT NULL,
+      type       TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    -- A relationship as said: from —label→ to ("Paruk —boss of→ Atharv").
+    CREATE TABLE IF NOT EXISTS graph_edges (
+      id         INTEGER PRIMARY KEY,
+      from_id    INTEGER NOT NULL REFERENCES graph_nodes(id) ON DELETE CASCADE,
+      to_id      INTEGER NOT NULL REFERENCES graph_nodes(id) ON DELETE CASCADE,
+      label      TEXT NOT NULL,
+      quote      TEXT NOT NULL,
+      source     TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE (from_id, to_id, label)
+    );
+    -- Each sentence a node was mentioned in. source identifies the voice note
+    -- ("chat:<id>:<n>"), so saving it again replaces rather than duplicates.
+    CREATE TABLE IF NOT EXISTS graph_mentions (
+      id         INTEGER PRIMARY KEY,
+      node_id    INTEGER NOT NULL REFERENCES graph_nodes(id) ON DELETE CASCADE,
+      quote      TEXT NOT NULL,
+      source     TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
     -- Drafts only. Nothing in this app sends email.
@@ -231,6 +271,7 @@ export function getRecordingDetail(id: string): RecordingDetail | null {
   const { file_path, ...rest } = rec;
   return {
     ...rest,
+    has_audio: Boolean(file_path),
     segments: getSegments(id),
     action_items: getActionItems(id),
     mentions: getMentions(id),
@@ -344,6 +385,92 @@ export function listDrafts() {
 
 export const deleteEvent = (id: number) => Number(db.prepare('DELETE FROM calendar_events WHERE id = ?').run(id).changes);
 export const deleteDraft = (id: number) => Number(db.prepare('DELETE FROM email_drafts WHERE id = ?').run(id).changes);
+
+export function listChats() {
+  return db.prepare('SELECT id, title, updated_at FROM chats ORDER BY updated_at DESC LIMIT 100')
+    .all().map(plain<{ id: string; title: string; updated_at: string }>);
+}
+
+export function getChat(id: string) {
+  const row = db.prepare('SELECT id, title, data FROM chats WHERE id = ?').get(id);
+  return row ? { id: row.id as string, title: row.title as string, turns: JSON.parse(row.data as string) as unknown[] } : null;
+}
+
+export function saveChat(id: string, title: string, turns: unknown[]) {
+  db.prepare(`
+    INSERT INTO chats (id, title, data) VALUES (?, ?, ?)
+    ON CONFLICT(id) DO UPDATE SET title = excluded.title, data = excluded.data, updated_at = datetime('now')
+  `).run(id, title, JSON.stringify(turns));
+}
+
+export const deleteChat = (id: string) => Number(db.prepare('DELETE FROM chats WHERE id = ?').run(id).changes);
+
+// ---------- knowledge graph ----------
+
+function upsertNode(name: string, type: string) {
+  const key = name.toLowerCase();
+  db.prepare('INSERT INTO graph_nodes (key, name, type) VALUES (?, ?, ?) ON CONFLICT(key) DO NOTHING').run(key, name, type);
+  return Number(db.prepare('SELECT id FROM graph_nodes WHERE key = ?').get(key)!.id);
+}
+
+// Save what one voice note established. Mentions from the same source are
+// replaced, so saving a voice note twice doesn't double-count.
+export function ingestGraph(source: string, nodes: { name: string; type: string; quote: string }[], edges: { from: string; to: string; label: string; quote: string }[]) {
+  transaction(() => {
+    db.prepare('DELETE FROM graph_mentions WHERE source = ?').run(source);
+    const ids = new Map<string, number>();
+    for (const n of nodes) {
+      const id = upsertNode(n.name, n.type);
+      ids.set(n.name.toLowerCase(), id);
+      db.prepare('INSERT INTO graph_mentions (node_id, quote, source) VALUES (?, ?, ?)').run(id, n.quote, source);
+    }
+    for (const e of edges) {
+      const from = ids.get(e.from.toLowerCase()), to = ids.get(e.to.toLowerCase());
+      if (!from || !to) continue;
+      db.prepare(`INSERT INTO graph_edges (from_id, to_id, label, quote, source) VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(from_id, to_id, label) DO NOTHING`).run(from, to, e.label.toLowerCase(), e.quote, source);
+    }
+  });
+}
+
+export function getGraph() {
+  const nodes = db.prepare(`
+    SELECT n.id, n.name, n.type, (SELECT count(*) FROM graph_mentions m WHERE m.node_id = n.id) AS mentions
+    FROM graph_nodes n ORDER BY mentions DESC, n.name
+  `).all().map(plain<GraphNode>);
+  const edges = db.prepare('SELECT id, from_id, to_id, label, quote FROM graph_edges').all().map(plain<GraphEdge>);
+  return { nodes, edges };
+}
+
+// One node with its direct connections and the sentences it came up in.
+export function getNodeProfile(name: string): NodeProfile | null {
+  const node = db.prepare(`
+    SELECT n.id, n.name, n.type, (SELECT count(*) FROM graph_mentions m WHERE m.node_id = n.id) AS mentions
+    FROM graph_nodes n WHERE n.key = ?
+  `).get(name.toLowerCase());
+  if (!node) return null;
+  const links = db.prepare(`
+    SELECT e.label, e.quote, 'out' AS dir, o.name, o.type FROM graph_edges e JOIN graph_nodes o ON o.id = e.to_id WHERE e.from_id = ?
+    UNION ALL
+    SELECT e.label, e.quote, 'in' AS dir, o.name, o.type FROM graph_edges e JOIN graph_nodes o ON o.id = e.from_id WHERE e.to_id = ?
+  `).all(node.id, node.id).map(plain<NodeProfile['links'][number]>);
+  const quotes = db.prepare('SELECT quote FROM graph_mentions WHERE node_id = ? ORDER BY id DESC LIMIT 6')
+    .all(node.id).map((r) => r.quote as string);
+  return { ...plain<GraphNode>(node), links, quotes };
+}
+
+export function listPeople() {
+  return db.prepare(`
+    SELECT n.id, n.name, n.type,
+      (SELECT count(*) FROM graph_mentions m WHERE m.node_id = n.id) AS mentions,
+      (SELECT count(*) FROM graph_edges e WHERE e.from_id = n.id OR e.to_id = n.id) AS links,
+      (SELECT max(created_at) FROM graph_mentions m WHERE m.node_id = n.id) AS last_seen
+    FROM graph_nodes n ORDER BY n.type = 'person' DESC, mentions DESC, n.name
+  `).all().map(plain<GraphNode & { links: number; last_seen: string | null }>);
+}
+
+export const deleteNode = (id: number) => Number(db.prepare('DELETE FROM graph_nodes WHERE id = ?').run(id).changes);
+export const deleteEdge = (id: number) => Number(db.prepare('DELETE FROM graph_edges WHERE id = ?').run(id).changes);
 
 // Recordings left mid-pipeline by a crash or restart.
 export function unfinishedRecordingIds() {

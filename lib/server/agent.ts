@@ -1,9 +1,9 @@
 import type Anthropic from '@anthropic-ai/sdk';
-import type { Answer, AnswerPart, Citation, Proposal } from '../types';
+import type { Answer, AnswerPart, Citation, NodeProfile, Proposal } from '../types';
 import { fmtClock, fmtTime } from '../format';
-import { checkDraft, checkEvent } from './actions';
+import { checkDraft, checkEvent, checkPrint } from './actions';
 import {
-  getActionItems, getMentions, getRecording, getSegments, listAllActionItems, listDrafts, listEvents, listRecordings,
+  getActionItems, getMentions, getNodeProfile, getRecording, getSegments, listAllActionItems, listDrafts, listEvents, listRecordings,
   searchSegmentsAny,
 } from './db';
 import { ask as askClaude, textOf } from './claude';
@@ -64,6 +64,15 @@ const TOOLS: Anthropic.Beta.BetaTool[] = [
     input_schema: { type: 'object', properties: {} },
   },
   {
+    name: 'lookup_graph',
+    description: 'The knowledge graph built from everything said in chats: one person, organisation, place or thing, with how it connects to others (e.g. "boss of", "works at") and the sentences those came from. Use it for questions about who someone is or how people relate. The result is shown to the user as a card.',
+    input_schema: {
+      type: 'object',
+      properties: { name: { type: 'string', description: 'The name as said, e.g. "Paruk"' } },
+      required: ['name'],
+    },
+  },
+  {
     name: 'propose_event',
     description: 'Suggest a calendar event. This saves nothing: the user sees a card and decides. Only for a meeting or deadline actually said in a recording.',
     input_schema: {
@@ -93,6 +102,19 @@ const TOOLS: Anthropic.Beta.BetaTool[] = [
       required: ['to', 'subject', 'body', 'source'],
     },
   },
+  {
+    name: 'propose_print',
+    description: 'Suggest printing a page on the office printer (via the ESP32). This prints nothing: the user sees a card and decides. Use when the user asks to print something, e.g. a summary, transcript or action items. The body must be built only from what tools returned.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        title: { type: 'string', description: 'Heading printed at the top' },
+        body: { type: 'string', description: 'Plain text to print. No markdown, no citation markers.' },
+        source: SOURCE,
+      },
+      required: ['title', 'body', 'source'],
+    },
+  },
 ];
 
 const systemPrompt = (today: string) => `You answer questions about the user's voice recordings. Today is ${today}.
@@ -102,6 +124,8 @@ Use the tools to find the answer. Base every statement only on what the tools re
 Cite every fact with a marker right after it, in the form [[RECORDING_ID@SECONDS]], using a recording id and a t= value exactly as a tool returned them. Example: The review moved to Friday [[rec-01_2026-11-05T14-32-10@41.2]]. For facts about a recording as a whole, such as when it was made or how long it is, cite it at 0.
 
 When the user asks to put something in the calendar or draft an email, first find where it was said, then call propose_event or propose_draft. Proposing saves nothing; tell the user to confirm the card below, and cite the source. Never claim anything was saved or sent. Dates must come from the recordings; if a date or time was never said, don't invent one: leave the time null, or say the recordings don't give a date.
+
+For who-is or how-are-they-related questions, call lookup_graph; its card is shown under your answer, so answer in a sentence or two from it (the graph's facts need no citation marker).
 
 If the tools don't contain the answer, reply exactly: The recordings don't say.
 
@@ -118,7 +142,7 @@ const note = (ev: Evidence, id: string, t: number) => {
 
 const t1 = (s: number) => Math.round(s * 10) / 10;
 
-function runTool(name: string, args: any, ev: Evidence, proposals: Proposal[]): unknown {
+function runTool(name: string, args: any, ev: Evidence, proposals: Proposal[], profiles: NodeProfile[]): unknown {
   switch (name) {
     case 'search_transcripts': {
       const hits = searchSegmentsAny(String(args.query ?? ''));
@@ -181,14 +205,22 @@ function runTool(name: string, args: any, ev: Evidence, proposals: Proposal[]): 
         drafts: drafts.map((d) => ({ to: d.to, subject: d.subject, body: d.body, source: src(d.source) })),
       };
     }
+    case 'lookup_graph': {
+      const profile = getNodeProfile(String(args.name ?? '').slice(0, 80));
+      if (!profile) return { found: false, note: 'Nobody by that name in the graph. Try search_transcripts.' };
+      if (!profiles.some((p) => p.id === profile.id)) profiles.push(profile);
+      return { found: true, shown_as_card: true, ...profile };
+    }
     case 'propose_event':
-    case 'propose_draft': {
+    case 'propose_draft':
+    case 'propose_print': {
       // The source has to be a moment a tool already showed the model.
       const check = (id: string, t: number) => snap(ev, id, t);
-      const result = name === 'propose_event' ? checkEvent(args, check) : checkDraft(args, check);
+      const result = name === 'propose_event' ? checkEvent(args, check)
+        : name === 'propose_draft' ? checkDraft(args, check) : checkPrint(args, check);
       if (!result.ok) return { error: result.error };
       proposals.push(result.value);
-      return { proposed: true, note: 'Shown to the user as a card. Nothing is saved until they press Confirm.' };
+      return { proposed: true, note: 'Shown to the user as a card. Nothing is saved or printed until they press Confirm.' };
     }
     default:
       return { error: `Unknown tool ${name}` };
@@ -230,10 +262,16 @@ function toParts(raw: string, ev: Evidence): AnswerPart[] {
   return parts;
 }
 
-export async function ask(history: { role: 'user' | 'assistant'; content: string }[]): Promise<Answer> {
+// focus: the recording this chat was just made from, if any. Its pipeline may
+// still be running, so the agent is told the id rather than its contents.
+export async function ask(history: { role: 'user' | 'assistant'; content: string }[], focus?: string): Promise<Answer> {
   const ev: Evidence = new Map();
   const proposals: Proposal[] = [];
-  const system = systemPrompt(new Date().toISOString().slice(0, 10));
+  const profiles: NodeProfile[] = [];
+  const rec = focus ? getRecording(focus) : undefined;
+  const system = systemPrompt(new Date().toISOString().slice(0, 10)) + (rec
+    ? `\n\nThis chat is about the recording ${rec.id} (recorded ${rec.recorded_at}). "This", "it" and "just now" refer to it; use get_recording on it first. If its status isn't ready yet, its transcript may still be filling in.`
+    : '');
   const messages: Anthropic.Beta.BetaMessageParam[] = history.slice(-12);
 
   for (let step = 0; step < MAX_STEPS; step++) {
@@ -248,16 +286,17 @@ export async function ask(history: { role: 'user' | 'assistant'; content: string
       const parts = toParts(raw, ev);
       // An answer with no citation that survived the check has no evidence
       // behind it, whatever it claims. Refuse instead of passing it on.
-      // A proposal counts as evidence: it only exists if its source checked out.
-      if (!proposals.length && !parts.some((p) => p.type === 'cite')) {
+      // A proposal or a graph card counts as evidence: each only exists if
+      // it came from what was actually said.
+      if (!proposals.length && !profiles.length && !parts.some((p) => p.type === 'cite')) {
         return { raw: NO_EVIDENCE, parts: [{ type: 'text', text: NO_EVIDENCE }], proposals: [] };
       }
-      return { raw, parts, proposals };
+      return { raw, parts, proposals, profiles };
     }
     // All results go back in one user message.
     const results: Anthropic.Beta.BetaToolResultBlockParam[] = calls.map((call) => {
       try {
-        return { type: 'tool_result', tool_use_id: call.id, content: JSON.stringify(runTool(call.name, call.input ?? {}, ev, proposals)) };
+        return { type: 'tool_result', tool_use_id: call.id, content: JSON.stringify(runTool(call.name, call.input ?? {}, ev, proposals, profiles)) };
       } catch (err) {
         return { type: 'tool_result', tool_use_id: call.id, is_error: true, content: `Tool failed: ${(err as Error).message}` };
       }

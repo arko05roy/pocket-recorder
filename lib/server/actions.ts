@@ -1,4 +1,4 @@
-import type { Citation, DraftProposal, EventProposal } from '../types';
+import type { Citation, DraftProposal, EventProposal, PrintProposal } from '../types';
 import { getActionItems, getMentions, getRecording, getSegments } from './db';
 import { date, str, time } from './validate';
 
@@ -61,4 +61,14 @@ export function checkDraft(raw: any, check: SourceCheck): Result<DraftProposal> 
   if (!body) return { ok: false, error: 'body is required' };
   if (!src) return { ok: false, error: NO_SOURCE };
   return { ok: true, value: { kind: 'draft', to, subject, body, source: src } };
+}
+
+export function checkPrint(raw: any, check: SourceCheck): Result<PrintProposal> {
+  const title = str(raw?.title, 120);
+  const body = str(raw?.body, 8000);
+  const src = source(raw?.source, check);
+  if (!title) return { ok: false, error: 'title is required' };
+  if (!body) return { ok: false, error: 'body is required (the text to print)' };
+  if (!src) return { ok: false, error: NO_SOURCE };
+  return { ok: true, value: { kind: 'print', title, body, source: src } };
 }

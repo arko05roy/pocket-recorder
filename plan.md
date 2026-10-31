@@ -13,7 +13,9 @@ Software (FDE track) first, then hardware. The Next.js app built here is also th
 | Move to Next.js 16 + TypeScript | Done | `22e9651`, `c959037` |
 | L4 Ask | Built; citations untested until real samples arrive | `c8e4abf` |
 | L5 Act | Built; agent proposals untested until real samples arrive | `e7b0678` |
-| L6 Honest & live | Built: honesty safeguards + evidence check (`3fa1e23`), SSE live push | |
+| L6 Honest & live | Built: honesty safeguards + evidence check, SSE live push | `3fa1e23`, `f42d75c` |
+| Claude Opus 5.5 for analysis + agent (Whisper stays) | Done | `04ec3e7` |
+| Chat studio: in-app recording with live 3 s Whisper chunks, generative cards, knowledge graph (People, Graph pages), device pop-ups, white UI | Built; tested by hand on real speech, not on official samples | this commit |
 | H1 Board alive | Done | |
 | H2 Mic | Blocked: second INMP441 reads all zeros (SD held low); wiring being re-checked by colour | |
 | H3–H6 Hardware | Not started | |
@@ -95,7 +97,7 @@ Mic status (31 Oct): first INMP441 was damaged during soldering (reacted to taps
 
 - [ ] **H2** I2S mic → PSRAM buffer → 32-bit to 16-bit conversion → WAV header → file in flash (LittleFS)
 - [ ] **H3** LED state machine (red steady for the whole recording, blue blinking while uploading, green for 2 s, amber while queued, fast red on error)
-- [ ] **H4** NTP time, multipart upload to this server, 201 check
+- [ ] **H4** NTP time, multipart upload to this server, 201 check. On Wi-Fi connect, then every 30 s: `POST /api/devices/hello` with `device_id` (and optional `battery_pct`, `rssi`); the app shows an "ESP32 mic connected" pop-up on first hello and "disconnected" after 90 s of silence
 - [ ] **H5** Offline queue: clips stay in flash with metadata; deleted only after a 201; retried on reconnect
 - [ ] **H6** Power bank run + current measurements in the README
 

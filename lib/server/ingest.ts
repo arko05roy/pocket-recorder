@@ -42,10 +42,10 @@ async function processRecording(id: string) {
   const rec = getRecording(id);
   if (!rec) return;
 
-  if (rec.duration_ms == null) setDuration(id, await probeDurationMs(rec.file_path));
+  if (rec.file_path && rec.duration_ms == null) setDuration(id, await probeDurationMs(rec.file_path));
 
   // After a restart, a recording that was already transcribed only needs analysing.
-  if (rec.status !== 'transcribed' && rec.status !== 'analysing') await transcribeRecording(rec);
+  if (rec.file_path && rec.status !== 'transcribed' && rec.status !== 'analysing') await transcribeRecording(rec);
 
   setStatus(id, 'analysing');
   const segments = getSegments(id);

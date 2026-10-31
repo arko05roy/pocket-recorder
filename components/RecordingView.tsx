@@ -32,20 +32,20 @@ export default function RecordingView({ rec }: { rec: RecordingDetail }) {
 
   return (
     <article className="doc">
-      <Link href="/" className="back">‹ All recordings</Link>
+      <Link href="/recordings" className="back">‹ All recordings</Link>
       <h1>{rec.title ?? `${fmtShortDay(rec.recorded_at)}, ${fmtTime(rec.recorded_at)}`}</h1>
       <dl className="props">
         <dt>Recorded</dt><dd className="mono">{rec.recorded_at}</dd>
         <dt>Device</dt><dd>{rec.device_id}</dd>
         <dt>Length</dt><dd className="mono">{fmtClock((rec.duration_ms ?? 0) / 1000)}</dd>
-        <dt>Battery</dt><dd>{battery}</dd>
+        {rec.has_audio && <><dt>Battery</dt><dd>{battery}</dd></>}
         <dt>Status</dt><dd><span className={`pill${rec.status === 'error' ? ' error' : ''}`}>{STATUS[rec.status]}</span></dd>
       </dl>
 
       <Analysis rec={rec} playFrom={playFrom} />
 
       <h2 className="section">Transcript</h2>
-      <Player ref={player} rec={rec} onTime={setNow} />
+      {rec.has_audio && <Player ref={player} rec={rec} onTime={setNow} />}
       <Transcript rec={rec} active={active} found={found} playFrom={playFrom} />
     </article>
   );

@@ -2,6 +2,7 @@ import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { AUDIO_DIR, getRecording, insertRecording } from '@/lib/server/db';
 import { enqueue } from '@/lib/server/ingest';
+import { deviceSeen } from '@/lib/server/devices';
 
 // The hand-off contract: POST /upload, multipart/form-data with
 // audio, device_id, recorded_at, duration_ms, battery_pct.
@@ -49,6 +50,8 @@ export async function POST(request: Request) {
   }
 
   const id = recordingId(device_id, recorded_at);
+  // The browser recorder isn't a device; anything else uploading is.
+  if (device_id !== 'web-app') deviceSeen(device_id, battery_pct);
 
   // A device retry after a lost 201 must not create a duplicate.
   if (getRecording(id)) return Response.json({ id, status: 'saved' }, { status: 201 });

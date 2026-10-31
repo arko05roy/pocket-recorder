@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
 import type { RecordingSummary, SearchHit } from '@/lib/types';
 import { STATUS, fmtClock, fmtDay, fmtShortDay, fmtTime, isPending, recordingHref } from '@/lib/format';
@@ -50,7 +50,6 @@ export default function Sidebar({ recordings }: { recordings: RecordingSummary[]
 
   return (
     <aside className="sidebar">
-      <Link href="/" className="brand"><span className="led" aria-hidden="true" />Pocket Recorder</Link>
       <label className="search">
         <span className="visually-hidden">Search transcripts</span>
         <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.5" /><path d="M10.5 10.5 14 14" /></svg>
@@ -70,11 +69,6 @@ export default function Sidebar({ recordings }: { recordings: RecordingSummary[]
         />
         <kbd>/</kbd>
       </label>
-      <nav className="links" aria-label="Pages">
-        {[['/ask', 'Ask the recordings'], ['/calendar', 'Calendar'], ['/drafts', 'Drafts']].map(([href, label]) => (
-          <Link key={href} href={href} className="ask-link" aria-current={pathname === href ? 'page' : undefined}>{label}</Link>
-        ))}
-      </nav>
       <nav className="list" aria-label="Recordings">
         {results ? <Results results={results} query={query.trim()} /> : <ByDay recordings={recordings} currentId={currentId} />}
       </nav>
@@ -137,6 +131,44 @@ function Snippet({ text }: { text: string }) {
       {text.split(/(\u0002[^\u0003]*\u0003)/).map((part, i) =>
         part.startsWith('\u0002') ? <mark key={i}>{part.slice(1, -1)}</mark> : part,
       )}
+    </>
+  );
+}
+
+// Upload an audio file (transcribed like a recorder upload) or a .txt/.srt/.vtt
+// transcript (straight to summary and action items). Opens like any recording.
+function UploadTranscript() {
+  const router = useRouter();
+  const file = useRef<HTMLInputElement>(null);
+  const [state, setState] = useState<'idle' | 'busy' | string>('idle');
+  const upload = async (f: File) => {
+    setState('busy');
+    const form = new FormData();
+    form.append('file', f);
+    const res = await fetch('/api/transcripts', { method: 'POST', body: form }).catch(() => null);
+    const body = await res?.json().catch(() => null);
+    if (!res?.ok) return setState(body?.error ?? 'Upload failed');
+    setState('idle');
+    router.push(recordingHref(body.id));
+    router.refresh();
+  };
+  return (
+    <>
+      <button type="button" className="ask-link" disabled={state === 'busy'} onClick={() => file.current?.click()}>
+        {state === 'busy' ? 'Uploading…' : 'Upload audio or transcript'}
+      </button>
+      <input
+        ref={file}
+        type="file"
+        accept="audio/*,.mp3,.m4a,.wav,.ogg,.opus,.webm,.flac,.mp4,.txt,.srt,.vtt,.md,text/plain"
+        hidden
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          e.target.value = '';
+          if (f) upload(f);
+        }}
+      />
+      {state !== 'idle' && state !== 'busy' && <p className="side-note" role="alert">{state}</p>}
     </>
   );
 }

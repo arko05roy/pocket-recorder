@@ -51,6 +51,7 @@ export interface RecordingDetail {
   error: string | null;
   title: string | null;
   summary: string | null;
+  has_audio: boolean;
   segments: Segment[];
   action_items: ActionItem[];
   mentions: Mention[];
@@ -87,7 +88,15 @@ export interface DraftProposal {
   source: Citation;
 }
 
-export type Proposal = EventProposal | DraftProposal;
+// A page to print. Sent to the ESP32, which forwards it to the network printer.
+export interface PrintProposal {
+  kind: 'print';
+  title: string;
+  body: string;
+  source: Citation;
+}
+
+export type Proposal = EventProposal | DraftProposal | PrintProposal;
 
 export type CalendarEvent = Omit<EventProposal, 'kind'> & { id: number; created_at: string };
 export type EmailDraft = Omit<DraftProposal, 'kind'> & { id: number; created_at: string };
@@ -95,6 +104,8 @@ export type EmailDraft = Omit<DraftProposal, 'kind'> & { id: number; created_at:
 export interface Answer {
   parts: AnswerPart[];
   proposals: Proposal[];
+  // People or things the answer is about, shown as cards from the graph.
+  profiles?: NodeProfile[];
   // The model's raw reply, sent back as history on the next question.
   raw: string;
 }
@@ -107,4 +118,75 @@ export interface SearchHit {
   snippet: string;
   recorded_at: string;
   device_id: string;
+}
+
+// What the chat shows while you record. Claude picks the cards; every row,
+// item and entity cites the transcript line it came from.
+export interface LiveLine {
+  i: number;
+  text: string;
+}
+
+export type CardKind = 'table' | 'checklist' | 'facts' | 'timeline' | 'metrics' | 'quotes';
+
+export interface LiveCard {
+  kind: CardKind;
+  title: string;
+  columns: string[];                          // table only
+  rows: { cells: string[]; line: number }[];  // table only
+  // Every other kind. label is the date (timeline), the value (metrics),
+  // the key (facts) or who said it (quotes); empty for checklists.
+  items: { text: string; label: string; line: number }[];
+}
+
+export type EntityType = 'person' | 'item' | 'date' | 'amount' | 'place' | 'org';
+
+// A name or value exactly as written in its line, for highlighting.
+export interface Entity {
+  text: string;
+  type: EntityType;
+  line: number;
+}
+
+// A relationship heard between two entities, e.g. Priya —ordered→ latte.
+export interface Relation {
+  from: string;
+  to: string;
+  label: string;
+  line: number;
+}
+
+export interface LiveState {
+  cards: LiveCard[];
+  entities: Entity[];
+  relations: Relation[];
+}
+
+// The saved knowledge graph.
+export interface GraphNode {
+  id: number;
+  name: string;
+  type: EntityType;
+  mentions: number;
+}
+
+export interface GraphEdge {
+  id: number;
+  from_id: number;
+  to_id: number;
+  label: string;   // reads as "from <label> to": "boss of"
+  quote: string;   // the sentence it was said in
+}
+
+export interface NodeProfile extends GraphNode {
+  links: { label: string; quote: string; dir: 'out' | 'in'; name: string; type: EntityType }[];
+  quotes: string[];
+}
+
+// A recorder joining or leaving, pushed to every open page.
+export interface DeviceEvent {
+  device_id: string;
+  event: 'connected' | 'disconnected';
+  battery_pct: number | null;
+  rssi: number | null;  // Wi-Fi signal in dBm, e.g. -55
 }

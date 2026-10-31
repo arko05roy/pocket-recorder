@@ -1,25 +1,10 @@
-import { listRecordings } from '@/lib/server/db';
+import { randomUUID } from 'node:crypto';
+import { redirect } from 'next/navigation';
 
 export const dynamic = 'force-dynamic';
 
+// Every visit to / starts a new chat at its own address. Nothing is saved
+// until something is said or asked in it.
 export default function Home() {
-  const any = listRecordings().length > 0;
-  return (
-    <div className="doc empty start">
-      {any ? (
-        <>
-          <h1>Pick a recording</h1>
-          <p>Choose one from the list to read its transcript and play it back, or search every transcript at once.</p>
-        </>
-      ) : (
-        <>
-          <h1>No recordings yet</h1>
-          <p>
-            Recordings appear here when the recorder uploads them. To load sample recordings, run{' '}
-            <code>npm run seed &lt;folder&gt;</code>.
-          </p>
-        </>
-      )}
-    </div>
-  );
+  redirect(`/c/${randomUUID()}`);
 }
