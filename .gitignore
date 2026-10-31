@@ -9,3 +9,5 @@ pocket-recorder-challenge.html
 .next/
 next-env.d.ts
 *.tsbuildinfo
+firmware/printer/secrets.h
+firmware/usbprinter/secrets.h
