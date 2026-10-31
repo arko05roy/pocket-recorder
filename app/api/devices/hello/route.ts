@@ -1,7 +1,7 @@
 import { deviceSeen } from '@/lib/server/devices';
 
 // POST from the recorder when it joins Wi-Fi, then every 30 s as a heartbeat.
-// JSON or form fields: device_id (required), battery_pct, rssi (both optional).
+// JSON or form fields: device_id (required), battery_pct, rssi, kind ('mic' | 'printer'), ip (optional).
 export async function POST(request: Request) {
   const type = request.headers.get('content-type') ?? '';
   const body: Record<string, unknown> = type.includes('json')
@@ -15,6 +15,8 @@ export async function POST(request: Request) {
     const n = v === '' || v == null ? NaN : Number(v);
     return Number.isFinite(n) && n >= lo && n <= hi ? Math.round(n) : null;
   };
-  const isNew = deviceSeen(device_id, num(body.battery_pct, 0, 100), num(body.rssi, -120, 0));
+  const kind = body.kind === 'printer' ? 'printer' : 'mic';
+  const ip = typeof body.ip === 'string' && /^\d{1,3}(\.\d{1,3}){3}$/.test(body.ip) ? body.ip : null;
+  const isNew = deviceSeen(device_id, num(body.battery_pct, 0, 100), num(body.rssi, -120, 0), kind, ip);
   return Response.json({ ok: true, announced: isNew });
 }

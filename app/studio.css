@@ -358,3 +358,73 @@
 .rail-fail { display: block; padding: 0 10px 6px; font-size: 12px; color: #C2272D; }
 .confirm-panel { display: grid; gap: 10px; padding: 12px 14px; border-radius: 12px; background: #FDF0F0; box-shadow: inset 0 0 0 1px #F4CFCF; font-size: 13.5px; animation: rise .2s ease-out both; }
 .confirm-panel p { margin: 0; }
+
+/* Printers section in the rail (components/studio/PrinterPanel.tsx). */
+.printers { display: grid; gap: 4px; padding-bottom: 12px; margin-bottom: 12px; border-bottom: 1px solid var(--s-line); }
+.pr-bridge { display: flex; align-items: center; gap: 8px; padding: 2px 10px; font-size: 13px; color: var(--s-text); }
+.pr-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--s-faint); }
+.pr-bridge.on .pr-dot { background: #1E9E4A; box-shadow: 0 0 0 3px rgb(30 158 74 / .15); }
+.pr-bridge.off { color: var(--s-muted); }
+.pr-faint { color: var(--s-faint); font-size: 12px; }
+.pr-current { display: flex; align-items: center; gap: 8px; padding: 2px 10px; font-size: 13px; color: var(--s-muted); min-width: 0; }
+.pr-current span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pr-current svg { flex: none; }
+.pr-scan, .pr-row button {
+  font: inherit; font-size: 12.5px; padding: 5px 10px; border-radius: 8px; cursor: pointer;
+  border: 1px solid var(--s-line); background: #fff; color: var(--s-text);
+}
+.pr-scan { margin: 4px 10px 0; justify-self: start; }
+.pr-scan:hover, .pr-row button:hover { border-color: var(--s-line-strong); }
+.pr-scan:disabled, .pr-row button:disabled { opacity: .6; cursor: default; }
+.pr-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 10px; min-width: 0; }
+.pr-name { display: grid; min-width: 0; font-size: 13px; }
+.pr-name span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pr-done { font-size: 12px; color: #1E9E4A; flex: none; }
+
+/* Docs: the card in chat, the list on /docs and the page on /docs/[id]. */
+.doc-card { display: grid; gap: 6px; margin-top: 10px; padding: 14px 16px; border: 1px solid var(--s-line); border-radius: 12px; background: #fff; color: var(--s-text); text-decoration: none; }
+.doc-card .kind { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--s-muted); }
+.doc-link:hover { border-color: var(--s-line-strong); }
+.doc-outline { margin: 2px 0 0; padding-left: 20px; font-size: 13.5px; color: var(--s-muted); }
+.doc-outline li { margin: 2px 0; }
+.doc-card .p-foot { display: flex; justify-content: space-between; align-items: center; margin-top: 4px; }
+.doc-open { font-size: 13px; font-weight: 500; color: var(--s-text); }
+.doc-status { display: inline-block; padding: 1px 8px; border-radius: 99px; font-size: 11.5px; font-weight: 500; background: #EEEEF2; color: var(--s-muted); }
+.doc-status.printed { background: #E3F4E9; color: #1E7A3C; }
+.docpage { max-width: 70ch; }
+.docpage-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin: 8px 0 18px; }
+.docpage-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.doc-print { display: inline-flex; align-items: center; gap: 7px; padding: 8px 14px; border: 0; border-radius: 9px; background: #18181B; color: #fff; font: inherit; font-size: 14px; font-weight: 500; cursor: pointer; }
+.doc-print:hover { background: #2B2B33; }
+.doc-print:disabled { opacity: .6; cursor: default; }
+.doc-del { padding: 7px 12px; border: 1px solid var(--s-line); border-radius: 9px; background: #fff; font: inherit; font-size: 13.5px; color: var(--s-muted); cursor: pointer; }
+.doc-del:hover { color: #C2272D; border-color: #F0C4C5; }
+.docpage h1 { margin: 0 0 18px; }
+.docpage h2 { margin: 26px 0 8px; font-size: 18px; }
+.docpage p, .docpage li { line-height: 1.6; white-space: pre-wrap; }
+.doc-sources { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 28px; padding-top: 14px; border-top: 1px solid var(--s-line); font-size: 13px; color: var(--s-muted); }
+
+/* Editable doc page: textareas styled as the page itself. */
+.docpage-state { display: flex; align-items: center; gap: 10px; }
+.doc-save { font-size: 12.5px; color: var(--s-faint); }
+.doc-save.failed { color: #C2272D; }
+.grow { display: block; width: 100%; resize: none; overflow: hidden; border: 0; padding: 4px 8px; margin: 0 -8px; border-radius: 8px; background: transparent; color: var(--s-text); font: inherit; line-height: 1.6; }
+.grow:hover { background: #F6F6F8; }
+.grow:focus { outline: none; background: #fff; box-shadow: inset 0 0 0 1px var(--s-line-strong); }
+.grow::placeholder { color: var(--s-faint); }
+.doc-title { font-family: var(--s-display); font-size: 30px; font-weight: 700; line-height: 1.2; letter-spacing: -0.01em; margin-bottom: 10px; }
+.doc-h2 { font-size: 18px; font-weight: 600; line-height: 1.3; }
+.doc-body { font-size: 15px; white-space: pre-wrap; }
+.doc-sec { position: relative; margin-top: 18px; padding-top: 6px; }
+.doc-sec-tools { position: absolute; right: 0; top: 6px; display: flex; gap: 2px; opacity: 0; transition: opacity .15s; z-index: 1; }
+.doc-sec:hover .doc-sec-tools, .doc-sec:focus-within .doc-sec-tools { opacity: 1; }
+@media (hover: none) { .doc-sec-tools { opacity: 1; } }
+.doc-sec-tools button { display: grid; place-items: center; width: 28px; height: 28px; border: 1px solid var(--s-line); border-radius: 7px; background: #fff; color: var(--s-muted); cursor: pointer; }
+.doc-sec-tools button:hover:not(:disabled) { color: var(--s-text); border-color: var(--s-line-strong); }
+.doc-sec-tools button.danger:hover { color: #C2272D; border-color: #F0C4C5; }
+.doc-sec-tools button:disabled { opacity: .35; cursor: default; }
+.doc-sec .doc-h2 { padding-right: 100px; }
+.doc-add { display: inline-flex; align-items: center; gap: 5px; margin-top: 6px; padding: 3px 8px; border: 0; border-radius: 7px; background: none; color: var(--s-faint); font: inherit; font-size: 12.5px; cursor: pointer; opacity: 0; transition: opacity .15s; }
+.doc-sec:hover .doc-add, .doc-add:focus-visible, .docpage > .doc-add { opacity: 1; }
+@media (hover: none) { .doc-add { opacity: 1; } }
+.doc-add:hover { background: #F0F0F3; color: var(--s-text); }

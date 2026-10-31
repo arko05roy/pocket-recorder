@@ -52,9 +52,10 @@ export default function LiveUpdates() {
             <svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3" /><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21" /></svg>
           </span>
           <div className="toast-text">
-            <b>{t.event === 'connected' ? 'ESP32 mic connected' : 'ESP32 mic disconnected'}</b>
+            <b>ESP32 {t.kind === 'printer' ? 'printer bridge' : 'mic'} {t.event === 'connected' ? 'connected' : 'disconnected'}</b>
             <span>
               {t.device_id}
+              {t.event === 'connected' && t.ip && ` · ${t.ip}`}
               {t.event === 'connected' && t.battery_pct != null && ` · ${t.battery_pct}% battery`}
               {t.event === 'connected' && t.rssi != null && ` · ${signal(t.rssi)} signal`}
               {t.event === 'disconnected' && ' · no heartbeat for 90 s'}

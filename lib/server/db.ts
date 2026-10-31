@@ -3,7 +3,7 @@ import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { publish } from './live';
 import type {
-  ActionItem, CalendarEvent, DraftProposal, GraphEdge, GraphNode, NodeProfile, EmailDraft, EventProposal, Mention, RecordingDetail,
+  ActionItem, CalendarEvent, Citation, Doc, DocSection, DraftProposal, GraphEdge, GraphNode, NodeProfile, EmailDraft, EventProposal, Mention, RecordingDetail,
   RecordingSummary, SearchHit, Segment, Status,
 } from '../types';
 
@@ -145,6 +145,23 @@ function open() {
       quote      TEXT NOT NULL,
       source     TEXT NOT NULL,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    -- Documents written in chat (/docs). sections and sources are JSON arrays.
+    CREATE TABLE IF NOT EXISTS docs (
+      id         INTEGER PRIMARY KEY,
+      title      TEXT NOT NULL,
+      sections   TEXT NOT NULL,
+      sources    TEXT NOT NULL DEFAULT '[]',
+      status     TEXT NOT NULL DEFAULT 'draft',
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      printed_at TEXT
+    );
+
+    -- Small key/value settings, e.g. the printer chosen in the sidebar.
+    CREATE TABLE IF NOT EXISTS settings (
+      key   TEXT PRIMARY KEY,
+      value TEXT NOT NULL
     );
 
     -- Drafts only. Nothing in this app sends email.
@@ -478,3 +495,38 @@ export function unfinishedRecordingIds() {
     "SELECT id FROM recordings WHERE status NOT IN ('ready', 'error') ORDER BY recorded_at"
   ).all().map((r) => r.id as string);
 }
+
+export function getSetting(key: string): string | null {
+  const row = db.prepare('SELECT value FROM settings WHERE key = ?').get(key) as { value: string } | undefined;
+  return row?.value ?? null;
+}
+
+export function setSetting(key: string, value: string) {
+  db.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').run(key, value);
+}
+
+type DocRow = { id: number; title: string; sections: string; sources: string; status: Doc['status']; created_at: string; printed_at: string | null };
+const toDoc = (r: DocRow): Doc => ({ ...plain<DocRow>(r), sections: JSON.parse(r.sections), sources: JSON.parse(r.sources) });
+
+export function insertDoc(title: string, sections: DocSection[], sources: Citation[]): Doc {
+  const id = Number(db.prepare('INSERT INTO docs (title, sections, sources) VALUES (?, ?, ?)')
+    .run(title, JSON.stringify(sections), JSON.stringify(sources)).lastInsertRowid);
+  return getDoc(id)!;
+}
+
+export function getDoc(id: number): Doc | null {
+  const row = db.prepare('SELECT * FROM docs WHERE id = ?').get(id) as DocRow | undefined;
+  return row ? toDoc(row) : null;
+}
+
+export const listDocs = () => (db.prepare('SELECT * FROM docs ORDER BY created_at DESC, id DESC').all() as DocRow[]).map(toDoc);
+
+export const markDocPrinted = (id: number) =>
+  db.prepare("UPDATE docs SET status = 'printed', printed_at = datetime('now') WHERE id = ?").run(id);
+
+export const deleteDoc = (id: number) => Number(db.prepare('DELETE FROM docs WHERE id = ?').run(id).changes);
+
+// An edit puts a printed doc back to draft: what's on paper no longer matches.
+export const updateDoc = (id: number, title: string, sections: DocSection[]) => Number(db.prepare(
+  "UPDATE docs SET title = ?, sections = ?, status = 'draft' WHERE id = ?",
+).run(title, JSON.stringify(sections), id).changes);

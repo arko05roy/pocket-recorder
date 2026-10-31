@@ -5,9 +5,10 @@ import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { VoiceOrb, type VoiceOrbState } from '@/components/assistant-ui/elements/voice';
 import { StreamingText, type Segment } from '@/components/assistant-ui/elements/streaming-text';
-import type { Answer, Entity, LiveCard, LiveLine, LiveState, NodeProfile, Relation } from '@/lib/types';
+import type { Answer, Doc, Entity, LiveCard, LiveLine, LiveState, NodeProfile, Relation } from '@/lib/types';
 import { fmtClock, recordingHref } from '@/lib/format';
 import { Parts, ProposalCard } from '../Answer';
+import { DocCard } from '../DocView';
 import { useLiveRecorder } from '../useLiveRecorder';
 import { CardView } from './Cards';
 import Constellation from './Constellation';
@@ -15,13 +16,14 @@ import PersonCard from './PersonCard';
 import { chipStyle, personPalette, type Palette } from './colors';
 
 export type Turn =
-  | { kind: 'voice'; id: number; lines: LiveLine[]; live: LiveState; updating?: boolean; savedId: string | null; durationS: number; inGraph?: boolean }
+  | { kind: 'voice'; id: number; lines: LiveLine[]; live: LiveState; updating?: boolean; savedId: string | null; durationS: number; inGraph?: boolean; docAsked?: boolean }
   | { kind: 'user'; text: string }
   | { kind: 'answer'; answer: Answer }
   | { kind: 'error'; text: string };
 type Voice = Extract<Turn, { kind: 'voice' }>;
 
 const EMPTY: LiveState = { cards: [], entities: [], relations: [] };
+
 
 const PROMPTS = [
   { label: 'Take an order', hint: '“Two oat lattes for Priya, one masala chai for Sam…”', record: true },
@@ -38,6 +40,7 @@ export default function Studio({ chatId, initialTurns, chats }: {
   const [turns, setTurns] = useState<Turn[]>(() => initialTurns.map((t) => (t.kind === 'voice' ? { ...t, updating: false } : t)));
   const [draft, setDraft] = useState('');
   const [busy, setBusy] = useState(false);
+  const [drafting, setDrafting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<number | null>(null);
   const [tab, setTab] = useState<'chat' | 'board'>('chat');
@@ -85,6 +88,58 @@ export default function Studio({ chatId, initialTurns, chats }: {
       }).then(() => setGraphVersion((v) => v + 1)).catch(() => {});
     }
   }, [turns, chatId, patchVoice]);
+
+  // Every finished voice note (stopped, saved, last live update done) is sent
+  // whole to Claude, which writes it up as a doc; the card shows in the chat.
+  // docStarted guards against the effect running twice before the docAsked
+  // flag lands in state (which once made two copies of a doc).
+  // Voice notes the chat opened with are skipped: only notes recorded now get a doc.
+  const docStarted = useRef(new Set<number>(initialTurns.flatMap((t) => (t.kind === 'voice' ? [t.id] : []))));
+  useEffect(() => {
+    for (const t of turns) {
+      if (t.kind !== 'voice' || !t.savedId || t.updating || t.docAsked || live.current.running) continue;
+      if (docStarted.current.has(t.id)) continue;
+      const transcript = t.lines.map((l) => l.text).join(' ').trim();
+      if (!transcript) continue;
+      docStarted.current.add(t.id);
+      patchVoice(t.id, () => ({ docAsked: true }));
+      setBusy(true);
+      setDrafting(true);
+      fetch('/api/docs/from-voice', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ recording_id: t.savedId, transcript }),
+      })
+        .then(async (res) => {
+          const body = await res.json();
+          if (!res.ok) { setTurns((all) => [...all, { kind: 'error', text: body.error ?? 'The doc couldn’t be written.' }]); return; }
+          const raw = 'I wrote this up as a doc. Edit it on the Docs page, then finalize and print.';
+          setTurns((all) => [...all, { kind: 'answer', answer: { raw, parts: [{ type: 'text', text: raw }], proposals: [], docs: [body as Doc] } }]);
+        })
+        .catch(() => setTurns((all) => [...all, { kind: 'error', text: 'The server can’t be reached, so the doc wasn’t written.' }]))
+        .finally(() => { setBusy(false); setDrafting(false); });
+    }
+  }, [turns, patchVoice]);
+
+  // On opening a chat: a voice note that asked for a doc but has no doc card
+  // after it (the page reloaded while it was being drafted) gets its card back.
+  useEffect(() => {
+    const shownDocs = new Set(initialTurns.flatMap((t) => (t.kind === 'answer' ? (t.answer.docs ?? []).map((d) => d.id) : [])));
+    for (const t of initialTurns) {
+      if (t.kind !== 'voice' || !t.docAsked || !t.savedId) continue;
+      fetch(`/api/docs?recording=${encodeURIComponent(t.savedId)}`)
+        .then((r) => r.json())
+        .then((docs: Doc[]) => {
+          const missing = docs.filter((d) => !shownDocs.has(d.id));
+          if (!missing.length) return;
+          const raw = 'Your doc is on the Docs page, ready to edit, finalize and print.';
+          setTurns((all) => [...all, { kind: 'answer', answer: { raw, parts: [{ type: 'text', text: raw }], proposals: [], docs: missing } }]);
+        })
+        .catch(() => {});
+    }
+    // Only for what the chat opened with.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const refreshLive = useCallback(async () => {
     const job = live.current;
@@ -264,11 +319,12 @@ export default function Studio({ chatId, initialTurns, chats }: {
                     <p className="answer"><Parts parts={t.answer.parts} /></p>
                     {(t.answer.profiles ?? []).map((p) => <PersonCard key={p.id} profile={p} palette={palette} />)}
                     {t.answer.proposals.map((p, k) => <ProposalCard key={k} proposal={p} />)}
+                    {(t.answer.docs ?? []).map((d) => <DocCard key={d.id} doc={d} />)}
                   </div>
                 </div>
               );
             })}
-            {busy && <div className="msg bot"><div className="bot-mark thinking" aria-hidden="true" /><p className="answer muted">Searching your recordings…</p></div>}
+            {busy && <div className="msg bot"><div className="bot-mark thinking" aria-hidden="true" /><p className="answer muted">{drafting ? 'Writing this up as a doc…' : 'Searching your recordings…'}</p></div>}
             <div ref={end} />
           </div>
         </div>

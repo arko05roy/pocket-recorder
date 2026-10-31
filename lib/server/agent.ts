@@ -1,12 +1,44 @@
 import type Anthropic from '@anthropic-ai/sdk';
-import type { Answer, AnswerPart, Citation, NodeProfile, Proposal } from '../types';
+import type { Answer, AnswerPart, Citation, Doc, DocSection, NodeProfile, Proposal } from '../types';
 import { fmtClock, fmtTime } from '../format';
 import { checkDraft, checkEvent, checkPrint } from './actions';
 import {
-  getActionItems, getMentions, getNodeProfile, getRecording, getSegments, listAllActionItems, listDrafts, listEvents, listRecordings,
+  getActionItems, getMentions, getNodeProfile, getRecording, getSegments, insertDoc, listAllActionItems, listDrafts, listEvents, listRecordings,
   searchSegmentsAny,
 } from './db';
 import { ask as askClaude, textOf } from './claude';
+import { date } from './validate';
+
+// Dates are plain YYYY-MM-DD strings; all arithmetic runs in UTC so the
+// server's own zone can't shift a day.
+const DAY = 86_400_000;
+const toDay = (s: string) => Date.parse(`${s}T00:00:00Z`);
+const iso = (ms: number) => new Date(ms).toISOString().slice(0, 10);
+const weekday = (s: string) => new Date(toDay(s)).toLocaleDateString('en-GB', { weekday: 'long', timeZone: 'UTC' });
+// Today on the machine's own clock, not UTC: at 1am local, UTC can still be yesterday.
+const todayLocal = () => {
+  const n = new Date();
+  return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, '0')}-${String(n.getDate()).padStart(2, '0')}`;
+};
+
+function calendar(from: string) {
+  const base = toDay(from);
+  const monday = base - ((new Date(base).getUTCDay() + 6) % 7) * DAY;
+  const week = (n: number) => ({ from: iso(monday + n * 7 * DAY), to: iso(monday + (n * 7 + 6) * DAY) });
+  const days = [];
+  for (let t = monday - 7 * DAY; t <= monday + 34 * DAY; t += DAY) {
+    const d = iso(t);
+    const rel = t === base ? 'today' : t === base + DAY ? 'tomorrow' : t === base - DAY ? 'yesterday' : undefined;
+    days.push(rel ? `${d} ${weekday(d)} (${rel})` : `${d} ${weekday(d)}`);
+  }
+  const [y, m] = from.split('-').map(Number);
+  return {
+    relative_to: `${from} ${weekday(from)}`,
+    this_week: week(0), next_week: week(1), week_after_next: week(2),
+    end_of_month: iso(Date.UTC(y, m, 0)),
+    days,
+  };
+}
 
 const MAX_STEPS = 6;
 const NO_EVIDENCE = "The recordings don't say.";
@@ -19,6 +51,16 @@ const SOURCE = {
 };
 
 const TOOLS: Anthropic.Beta.BetaTool[] = [
+  {
+    name: 'calendar',
+    description: 'A day-by-day calendar with weekdays, starting the week before a date and running five weeks on, with "this week", "next week" and "the week after" ranges (weeks run Monday to Sunday). Use it to turn words like "tomorrow", "Thursday", "next week" or "end of the month" into a YYYY-MM-DD date. Never work out dates in your head.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        from: { type: ['string', 'null'], description: 'YYYY-MM-DD the words are relative to: the recording date if the words were said in a recording, otherwise today. Defaults to today.' },
+      },
+    },
+  },
   {
     name: 'search_transcripts',
     description: 'Full-text search over every transcript line. Returns matching lines with recording id and start time. Try several phrasings or synonyms if the first finds nothing.',
@@ -103,6 +145,34 @@ const TOOLS: Anthropic.Beta.BetaTool[] = [
     },
   },
   {
+    name: 'create_doc',
+    description: 'Write a structured document (title plus sections, each with a heading and body) and save it as a draft on the Docs page. Use it whenever the user asks for a doc, document, write-up, report, notes, minutes, brief or summary "as a doc". Nothing prints: the user reviews it on /docs and presses Finalize & print. Facts about recordings must come from what tools returned; text the user dictated or recorded in this chat can be used as given. If the user only describes a document they need (e.g. "a doc to present our findings to the CTO"), draft its structure: the headings that document needs for that purpose and audience, each body saying in a line or two what belongs there, starting "To fill in:". Use any details they did say. Never invent facts, findings or numbers.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        title: { type: 'string' },
+        sections: {
+          type: 'array',
+          minItems: 1,
+          items: {
+            type: 'object',
+            properties: {
+              heading: { type: 'string' },
+              body: { type: 'string', description: 'Plain text paragraphs; use "- " at the start of a line for bullet points. No markdown headings, no citation markers.' },
+            },
+            required: ['heading', 'body'],
+          },
+        },
+        sources: {
+          type: 'array',
+          description: 'Recording moments the document is based on, as tools returned them. Empty if it only uses what the user said in chat.',
+          items: { type: 'object', properties: { recording_id: { type: 'string' }, t: { type: 'number' } }, required: ['recording_id', 't'] },
+        },
+      },
+      required: ['title', 'sections'],
+    },
+  },
+  {
     name: 'propose_print',
     description: 'Suggest printing a page on the office printer (via the ESP32). This prints nothing: the user sees a card and decides. Use when the user asks to print something, e.g. a summary, transcript or action items. The body must be built only from what tools returned.',
     input_schema: {
@@ -117,15 +187,21 @@ const TOOLS: Anthropic.Beta.BetaTool[] = [
   },
 ];
 
-const systemPrompt = (today: string) => `You answer questions about the user's voice recordings. Today is ${today}.
+const systemPrompt = (today: string) => `You answer questions about the user's voice recordings. Today is ${weekday(today)} ${today}.
 
 Use the tools to find the answer. Base every statement only on what the tools return; never on outside knowledge or guesses.
 
 Cite every fact with a marker right after it, in the form [[RECORDING_ID@SECONDS]], using a recording id and a t= value exactly as a tool returned them. Example: The review moved to Friday [[rec-01_2026-11-05T14-32-10@41.2]]. For facts about a recording as a whole, such as when it was made or how long it is, cite it at 0.
 
-When the user asks to put something in the calendar or draft an email, first find where it was said, then call propose_event or propose_draft. Proposing saves nothing; tell the user to confirm the card below, and cite the source. Never claim anything was saved or sent. Dates must come from the recordings; if a date or time was never said, don't invent one: leave the time null, or say the recordings don't give a date.
+When the user asks to put something in the calendar or draft an email, first find where it was said, then call propose_event or propose_draft. Proposing saves nothing; tell the user to confirm the card below, and cite the source. Never claim anything was saved or sent.
+
+Dates: relative words like "tomorrow", "Friday", "next week" or "end of the month" are real dates; resolve them with the calendar tool, never by mental arithmetic. Words said in a recording are relative to that recording's date (recorded_at); words the user types in this chat are relative to today. A date the user gives in chat is fine to use, as long as the source points at where the meeting or email was talked about. "Next week" with no day means the Monday of next week unless the recording narrows it; say which day you picked. Only if no day or week was ever given, by the recording or the user, ask the user for one instead of guessing. Leave the time null if none was said.
+
+Drafts: write the email in the user's voice from what was said. The body can mention dates; spell them out (e.g. "Tuesday 4 November") using the calendar tool. If the recording names the person but not their address, put the name in "to".
 
 For who-is or how-are-they-related questions, call lookup_graph; its card is shown under your answer, so answer in a sentence or two from it (the graph's facts need no citation marker).
+
+When the user asks for a doc or document, call create_doc, then reply in one short sentence saying it's on the Docs page, ready to finalize and print. Don't repeat the document in your reply; its card shows under your answer.
 
 If the tools don't contain the answer, reply exactly: The recordings don't say.
 
@@ -142,8 +218,33 @@ const note = (ev: Evidence, id: string, t: number) => {
 
 const t1 = (s: number) => Math.round(s * 10) / 10;
 
-function runTool(name: string, args: any, ev: Evidence, proposals: Proposal[], profiles: NodeProfile[]): unknown {
+function runTool(name: string, args: any, ev: Evidence, proposals: Proposal[], profiles: NodeProfile[], docs: Doc[], focus?: string): unknown {
   switch (name) {
+    case 'create_doc': {
+      const title = String(args.title ?? '').trim().slice(0, 160);
+      const sections: DocSection[] = (Array.isArray(args.sections) ? args.sections : [])
+        .map((s: any) => ({ heading: String(s?.heading ?? '').trim().slice(0, 160), body: String(s?.body ?? '').trim().slice(0, 8000) }))
+        .filter((s: DocSection) => s.heading || s.body)
+        .slice(0, 30);
+      if (!title) return { error: 'title is required' };
+      if (!sections.length) return { error: 'at least one section with a heading and body is required' };
+      // Keep only sources that point at a moment a tool actually showed.
+      const sources: Citation[] = [];
+      for (const s of Array.isArray(args.sources) ? args.sources : []) {
+        const start = snap(ev, String(s?.recording_id ?? ''), Number(s?.t));
+        const rec = start == null ? undefined : getRecording(String(s.recording_id));
+        if (!rec || start == null || sources.some((x) => x.recording_id === rec.id && x.start_s === start)) continue;
+        sources.push({ recording_id: rec.id, label: rec.title ?? `${rec.device_id} ${fmtTime(rec.recorded_at)}`, recorded_at: rec.recorded_at, start_s: start });
+      }
+      // A doc made from the recording this chat is about is always linked to it.
+      const fr = focus ? getRecording(focus) : undefined;
+      if (fr && !sources.some((s) => s.recording_id === fr.id)) {
+        sources.unshift({ recording_id: fr.id, label: fr.title ?? `${fr.device_id} ${fmtTime(fr.recorded_at)}`, recorded_at: fr.recorded_at, start_s: 0 });
+      }
+      const doc = insertDoc(title, sections, sources);
+      docs.push(doc);
+      return { created: true, id: doc.id, note: 'Saved as a draft on /docs and shown as a card. It prints only when the user presses Finalize & print.' };
+    }
     case 'search_transcripts': {
       const hits = searchSegmentsAny(String(args.query ?? ''));
       hits.forEach((h) => note(ev, h.recording_id, h.start_s));
@@ -211,6 +312,8 @@ function runTool(name: string, args: any, ev: Evidence, proposals: Proposal[], p
       if (!profiles.some((p) => p.id === profile.id)) profiles.push(profile);
       return { found: true, shown_as_card: true, ...profile };
     }
+    case 'calendar':
+      return calendar(typeof args.from === 'string' && date(args.from) ? args.from : todayLocal());
     case 'propose_event':
     case 'propose_draft':
     case 'propose_print': {
@@ -268,8 +371,9 @@ export async function ask(history: { role: 'user' | 'assistant'; content: string
   const ev: Evidence = new Map();
   const proposals: Proposal[] = [];
   const profiles: NodeProfile[] = [];
+  const docs: Doc[] = [];
   const rec = focus ? getRecording(focus) : undefined;
-  const system = systemPrompt(new Date().toISOString().slice(0, 10)) + (rec
+  const system = systemPrompt(todayLocal()) + (rec
     ? `\n\nThis chat is about the recording ${rec.id} (recorded ${rec.recorded_at}). "This", "it" and "just now" refer to it; use get_recording on it first. If its status isn't ready yet, its transcript may still be filling in.`
     : '');
   const messages: Anthropic.Beta.BetaMessageParam[] = history.slice(-12);
@@ -288,15 +392,16 @@ export async function ask(history: { role: 'user' | 'assistant'; content: string
       // behind it, whatever it claims. Refuse instead of passing it on.
       // A proposal or a graph card counts as evidence: each only exists if
       // it came from what was actually said.
-      if (!proposals.length && !profiles.length && !parts.some((p) => p.type === 'cite')) {
+      // A document is the user's own request written up, so it counts too.
+      if (!proposals.length && !profiles.length && !docs.length && !parts.some((p) => p.type === 'cite')) {
         return { raw: NO_EVIDENCE, parts: [{ type: 'text', text: NO_EVIDENCE }], proposals: [] };
       }
-      return { raw, parts, proposals, profiles };
+      return { raw, parts, proposals, profiles, docs };
     }
     // All results go back in one user message.
     const results: Anthropic.Beta.BetaToolResultBlockParam[] = calls.map((call) => {
       try {
-        return { type: 'tool_result', tool_use_id: call.id, content: JSON.stringify(runTool(call.name, call.input ?? {}, ev, proposals, profiles)) };
+        return { type: 'tool_result', tool_use_id: call.id, content: JSON.stringify(runTool(call.name, call.input ?? {}, ev, proposals, profiles, docs, focus)) };
       } catch (err) {
         return { type: 'tool_result', tool_use_id: call.id, is_error: true, content: `Tool failed: ${(err as Error).message}` };
       }

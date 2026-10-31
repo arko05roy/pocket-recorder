@@ -101,9 +101,24 @@ export type Proposal = EventProposal | DraftProposal | PrintProposal;
 export type CalendarEvent = Omit<EventProposal, 'kind'> & { id: number; created_at: string };
 export type EmailDraft = Omit<DraftProposal, 'kind'> & { id: number; created_at: string };
 
+// A structured document the agent wrote in chat. Saved as a draft straight
+// away; it only prints when the user presses Finalize & print on /docs.
+export interface DocSection { heading: string; body: string }
+export interface Doc {
+  id: number;
+  title: string;
+  sections: DocSection[];
+  sources: Citation[];
+  status: 'draft' | 'printed';
+  created_at: string;
+  printed_at: string | null;
+}
+
 export interface Answer {
   parts: AnswerPart[];
   proposals: Proposal[];
+  // Documents created in this answer, shown as cards linking to /docs.
+  docs?: Doc[];
   // People or things the answer is about, shown as cards from the graph.
   profiles?: NodeProfile[];
   // The model's raw reply, sent back as history on the next question.
@@ -189,4 +204,17 @@ export interface DeviceEvent {
   event: 'connected' | 'disconnected';
   battery_pct: number | null;
   rssi: number | null;  // Wi-Fi signal in dBm, e.g. -55
+  kind: 'mic' | 'printer'; // recorder, or the print bridge (firmware/printer)
+  ip: string | null;       // the board's address on the Wi-Fi, if it said
 }
+
+// A printer the ESP32 found on the Wi-Fi, and the printer ports it answered on.
+export interface FoundPrinter {
+  ip: string;
+  name: string;            // Bonjour name, or '' if it only answered the port sweep
+  queue: string;           // IPP queue name if it advertised one (a Mac sharing a printer), else ''
+  ports: number[];         // 9100 raw, 631 IPP, 515 LPD
+}
+
+// port 9100 = raw socket to the printer; 631 = IPP print queue (queue = its name, e.g. a Mac sharing a USB printer).
+export interface SavedPrinter { host: string; port: number; name: string; queue?: string }

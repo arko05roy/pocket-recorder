@@ -3,7 +3,8 @@
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useState } from 'react';
-import { AudioLines, Calendar, Mail, Network, PanelLeftClose, PanelLeftOpen, Plus, Trash2, Users } from 'lucide-react';
+import PrinterPanel from './PrinterPanel';
+import { AudioLines, Calendar, FileText, Mail, Network, PanelLeftClose, PanelLeftOpen, Plus, Trash2, Users } from 'lucide-react';
 
 const PAGES = [
   ['/people', 'People', Users],
@@ -11,6 +12,7 @@ const PAGES = [
   ['/recordings', 'Recordings', AudioLines],
   ['/calendar', 'Calendar', Calendar],
   ['/drafts', 'Drafts', Mail],
+  ['/docs', 'Docs', FileText],
 ] as const;
 
 // The app's navigation, on every page. Collapsed, it's a strip of icons.
@@ -26,7 +28,7 @@ export default function AppRail({ chats, collapsed, onToggle }: {
   const [deleting, setDeleting] = useState<string | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
   const chatId = path.startsWith('/c/') ? path.slice(3) : null;
-  const section = (href: string) => path === href || (href === '/recordings' && path.startsWith('/r/'));
+  const section = (href: string) => path === href || (href === '/recordings' && path.startsWith('/r/')) || (href === '/docs' && path.startsWith('/docs/'));
 
   const remove = async (id: string) => {
     setDeleting(id);
@@ -56,6 +58,7 @@ export default function AppRail({ chats, collapsed, onToggle }: {
           </Link>
         ))}
       </div>
+      {!collapsed && <PrinterPanel />}
       {!collapsed && (
         <>
           <div className="rail-label">Chats</div>

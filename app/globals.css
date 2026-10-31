@@ -396,3 +396,8 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1
 .live-list { margin: 0; padding-left: 18px; display: grid; gap: 6px; font-size: 15px; }
 .live-list.check { list-style: none; padding-left: 0; }
 .live-list.check li::before { content: "☐"; margin-right: 8px; color: var(--ink-muted); }
+
+/* Calendar page: wider than a reading page so the month grid has room. */
+.doc.doc-wide { max-width: 1100px; }
+.cal { margin-top: 8px; }
+.cal-detail { margin-top: 16px; border-left: 4px solid; padding-left: 12px; }

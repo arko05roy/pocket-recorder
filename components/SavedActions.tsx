@@ -25,3 +25,13 @@ export function CopyButton({ text }: { text: string }) {
   };
   return <button type="button" className="ghost" onClick={copy}>{copied ? 'Copied' : 'Copy'}</button>;
 }
+
+// Opens Gmail's compose window pre-filled. Nothing is sent from here: the
+// user reviews it in Gmail and presses Send themselves.
+export function GmailButton({ to, subject, body }: { to: string; subject: string; body: string }) {
+  // Only pass a real address; a bare name like "Parug" would be an invalid recipient.
+  const addr = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to.trim()) ? to.trim() : '';
+  const href = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(addr)}`
+    + `&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+  return <a className="ghost" href={href} target="_blank" rel="noopener noreferrer">Open in Gmail</a>;
+}
