@@ -15,7 +15,8 @@ Software (FDE track) first, then hardware. The Next.js app built here is also th
 | L5 Act | Built; agent proposals untested until real samples arrive | `e7b0678` |
 | L6 Honest & live | Built: honesty safeguards + evidence check (`3fa1e23`), SSE live push | |
 | H1 Board alive | Done | |
-| H2–H6 Hardware | Waiting on mic soldering | |
+| H2 Mic | Blocked: second INMP441 reads all zeros (SD held low); wiring being re-checked by colour | |
+| H3–H6 Hardware | Not started | |
 
 **Waiting on:** the official `sample-recordings` folder and `manifest.json`. Until then everything is tested with tones, silence and clearly labelled layout placeholders only. No made-up meeting content. **Not yet tested on real speech:** transcription accuracy, extraction quality, date resolution.
 
@@ -90,6 +91,8 @@ Board: ESP32-S3-N16R8 DevKit (16 MB flash, 8 MB PSRAM, onboard WS2812 RGB LED on
 Flash: `arduino-cli compile --upload -p /dev/cu.usbmodem* --fqbn "esp32:esp32:esp32s3:CDCOnBoot=cdc,PSRAM=opi,FlashSize=16M" firmware/recorder`. If it can't connect: hold BOOT, tap RST, release BOOT, then retry.
 
 - [x] **H1** Board alive: LED cycles R/G/B, serial prints `ready`
+Mic status (31 Oct): first INMP441 was damaged during soldering (reacted to taps, not speech). Second, pre-soldered one reads exactly 0 in every SCK/WS/channel combination; with SD unplugged GPIO 6 follows its pull-up, so the mic side holds SD low (most likely a wire mix-up: two white wires). Next: rewire one wire at a time against the table (VDD→3V3, GND→GND, SD→6, SCK→4, WS→5, L/R→GND) and run `firmware/micdiag`. `firmware/mictest` prints a live level once data arrives.
+
 - [ ] **H2** I2S mic → PSRAM buffer → 32-bit to 16-bit conversion → WAV header → file in flash (LittleFS)
 - [ ] **H3** LED state machine (red steady for the whole recording, blue blinking while uploading, green for 2 s, amber while queued, fast red on error)
 - [ ] **H4** NTP time, multipart upload to this server, 201 check
