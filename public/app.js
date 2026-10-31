@@ -35,11 +35,14 @@ function fmtClock(seconds) {
 const STATUS = {
   received: 'Waiting to transcribe',
   transcribing: 'Transcribing',
-  transcribed: 'Transcribed',
+  transcribed: 'Waiting to analyse',
+  analysing: 'Analysing',
   ready: 'Ready',
   error: 'Failed',
 };
-const isPending = (status) => status === 'received' || status === 'transcribing';
+const isPending = (status) => status !== 'ready' && status !== 'error';
+// Transcript is shown as soon as it exists, even while analysis still runs.
+const hasTranscript = (status) => status === 'transcribed' || status === 'analysing' || status === 'ready';
 
 async function getJson(url) {
   const res = await fetch(url);
@@ -132,7 +135,7 @@ function renderList() {
       : r.preview ? escapeHtml(r.preview) : 'No speech detected';
     html += `<button class="item" data-id="${escapeHtml(r.id)}" ${state.current?.id === r.id ? 'aria-current="true"' : ''}>
       <span class="time">${fmtTime(r.recorded_at)}</span>
-      <span class="title">${escapeHtml(r.device_id)} · ${fmtClock((r.duration_ms ?? 0) / 1000)}</span>
+      <span class="title">${escapeHtml(r.title ?? `${r.device_id} · ${fmtClock((r.duration_ms ?? 0) / 1000)}`)}</span>
       <span class="sub">${sub}</span>
     </button>`;
   }
@@ -215,7 +218,7 @@ function renderRecording(rec, t) {
   if (rec.status === 'error') {
     body = `<div class="empty"><p>Transcription failed: ${escapeHtml(rec.error ?? 'unknown error')}</p>
       <p>Restart the server to try again.</p></div>`;
-  } else if (isPending(rec.status)) {
+  } else if (!hasTranscript(rec.status)) {
     body = `<div class="empty"><p>${STATUS[rec.status]}… The transcript will appear here when it's done.</p></div>`;
   } else if (!segs.length) {
     body = `<div class="empty"><p>No speech detected in this recording.</p></div>`;
@@ -228,7 +231,7 @@ function renderRecording(rec, t) {
 
   page.innerHTML = `<article class="doc">
     <button class="back" type="button">‹ All recordings</button>
-    <h1>${escapeHtml(fmtShortDay(rec.recorded_at))}, ${fmtTime(rec.recorded_at)}</h1>
+    <h1>${escapeHtml(rec.title ?? `${fmtShortDay(rec.recorded_at)}, ${fmtTime(rec.recorded_at)}`)}</h1>
     <dl class="props">
       <dt>Recorded</dt><dd class="mono">${escapeHtml(rec.recorded_at)}</dd>
       <dt>Device</dt><dd>${escapeHtml(rec.device_id)}</dd>
@@ -236,6 +239,8 @@ function renderRecording(rec, t) {
       <dt>Battery</dt><dd>${battery}</dd>
       <dt>Status</dt><dd><span class="pill ${rec.status === 'error' ? 'error' : ''}">${STATUS[rec.status] ?? rec.status}</span></dd>
     </dl>
+    ${renderAnalysis(rec)}
+    <h2 class="section">Transcript</h2>
     <div class="player">
       <button class="play" type="button" aria-label="Play">${ICON_PLAY}</button>
       <div class="track" role="slider" tabindex="0" aria-label="Position" aria-valuemin="0" aria-valuenow="0">
@@ -252,7 +257,82 @@ function renderRecording(rec, t) {
   setupPlayer(rec, t);
 }
 
+// ---------- analysis ----------
+
+const fmtDate = (d) => new Date(d + 'T00:00:00').toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' });
+
+function at(source_s) {
+  return `<button class="at" type="button" data-t="${source_s}" aria-label="Play from ${fmtClock(source_s)}">${fmtClock(source_s)}</button>`;
+}
+
+// A resolved date wins; otherwise show the words that were said ("next week").
+function when(date, text, time = null) {
+  if (date) return escapeHtml(fmtDate(date) + (time ? `, ${time}` : ''));
+  return text ? escapeHtml(text) : '';
+}
+
+function renderAnalysis(rec) {
+  if (rec.status !== 'ready' || !rec.segments.length) {
+    return rec.status === 'analysing' || rec.status === 'transcribed'
+      ? `<p class="summary pending">Writing the summary and pulling out action items…</p>` : '';
+  }
+  const items = rec.action_items;
+  const meetings = rec.mentions.filter((m) => m.kind === 'meeting' || m.kind === 'date');
+  const people = rec.mentions.filter((m) => m.kind === 'person');
+
+  const itemsHtml = items.length
+    ? `<ul class="todos">${items.map((i) => `
+        <li class="${i.status === 'done' ? 'done' : ''}">
+          <input type="checkbox" data-item="${i.id}" ${i.status === 'done' ? 'checked' : ''} aria-label="Mark done">
+          <div><span class="what">${escapeHtml(i.what)}</span>
+            <span class="meta">${[i.who && `<b>${escapeHtml(i.who)}</b>`, when(i.due_date, i.due_text)].filter(Boolean).join(' · ')}</span></div>
+          ${at(i.source_s)}
+        </li>`).join('')}</ul>`
+    : `<p class="none">No action items.</p>`;
+
+  const meetingsHtml = meetings.length
+    ? `<ul class="rows">${meetings.map((m) => `
+        <li><span class="when">${when(m.date, m.detail, m.time) || '—'}</span>
+          <span>${escapeHtml(m.value)}${m.kind === 'meeting' ? ' <span class="tag">meeting</span>' : ''}</span>
+          ${at(m.source_s)}</li>`).join('')}</ul>`
+    : `<p class="none">No meetings or dates mentioned.</p>`;
+
+  const peopleHtml = people.length
+    ? `<div class="people">${people.map((p) => `<button class="person" type="button" data-t="${p.source_s}">
+        ${escapeHtml(p.value)}${p.detail ? `<span>${escapeHtml(p.detail)}</span>` : ''}</button>`).join('')}</div>`
+    : `<p class="none">No people mentioned.</p>`;
+
+  return `${rec.summary ? `<p class="summary">${escapeHtml(rec.summary)}</p>` : ''}
+    <h2 class="section">Action items</h2>${itemsHtml}
+    <h2 class="section">Meetings and dates</h2>${meetingsHtml}
+    <h2 class="section">People</h2>${peopleHtml}`;
+}
+
+page.addEventListener('change', async (e) => {
+  const box = e.target.closest('input[data-item]');
+  if (!box) return;
+  const status = box.checked ? 'done' : 'open';
+  box.closest('li').classList.toggle('done', box.checked);
+  const res = await fetch(`/api/action-items/${box.dataset.item}`, {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status }),
+  }).catch(() => null);
+  if (!res?.ok) { // undo the tick if the server didn't save it
+    box.checked = !box.checked;
+    box.closest('li').classList.toggle('done', box.checked);
+    return;
+  }
+  const item = state.current.action_items.find((i) => i.id === Number(box.dataset.item));
+  if (item) item.status = status;
+});
+
 page.addEventListener('click', (e) => {
+  const jump = e.target.closest('.at, .person');
+  if (jump) {
+    state.foundIdx = null;
+    seekTo(Number(jump.dataset.t));
+    audio.play();
+    return;
+  }
   if (e.target.closest('.back')) {
     location.hash = '';
     return;

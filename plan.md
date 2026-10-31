@@ -9,7 +9,7 @@ Software (FDE track) first, then hardware. The Node server built here is also th
 | Server | Node 20+, Express | Familiar; multer handles `multipart/form-data` |
 | Database | SQLite via `better-sqlite3` | One file, synchronous, zero setup |
 | Speech to text | Groq Whisper (`whisper-large-v3-turbo`) | Fast; `verbose_json` returns segment timestamps |
-| LLM | Groq `llama-3.3-70b-versatile` | Tool calling for the agent; JSON mode for extraction |
+| LLM | Groq `openai/gpt-oss-120b` (override with GROQ_MODEL) | Tool calling for the agent; JSON mode for extraction |
 | Audio prep | `ffmpeg` | Normalise any input to 16 kHz mono WAV, read duration |
 | Dashboard | Static HTML + vanilla JS served by Express | No build step, easy to explain |
 | Live updates | Server-Sent Events (`/events`) | New uploads appear without a refresh or restart |

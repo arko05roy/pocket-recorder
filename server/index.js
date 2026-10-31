@@ -3,7 +3,8 @@ import multer from 'multer';
 import { rename, rm } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import {
-  AUDIO_DIR, getRecording, getSegments, insertRecording, listRecordings, searchSegments,
+  AUDIO_DIR, getActionItems, getMentions, getRecording, getSegments, insertRecording, listRecordings,
+  searchSegments, setActionItemStatus,
 } from './db.js';
 import { enqueue, resumeUnfinished } from './ingest.js';
 
@@ -34,7 +35,19 @@ app.get('/api/recordings/:id', (req, res) => {
   const rec = getRecording(req.params.id);
   if (!rec) return res.status(404).json({ error: 'recording not found' });
   const { file_path, ...rest } = rec; // don't expose server paths
-  res.json({ ...rest, segments: getSegments(rec.id) });
+  res.json({
+    ...rest,
+    segments: getSegments(rec.id),
+    action_items: getActionItems(rec.id),
+    mentions: getMentions(rec.id),
+  });
+});
+
+app.patch('/api/action-items/:id', express.json(), (req, res) => {
+  const { status } = req.body ?? {};
+  if (status !== 'open' && status !== 'done') return res.status(400).json({ error: "status must be 'open' or 'done'" });
+  if (!setActionItemStatus(Number(req.params.id), status)) return res.status(404).json({ error: 'action item not found' });
+  res.json({ ok: true });
 });
 
 // sendFile supports HTTP Range requests, which the <audio> element needs to seek.

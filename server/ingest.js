@@ -1,7 +1,10 @@
 import { rm } from 'node:fs/promises';
 import { normalise, probeDurationMs, soundRanges } from './audio.js';
 import { transcribe } from './transcribe.js';
-import { getRecording, saveSegments, setDuration, setStatus, unfinishedRecordingIds } from './db.js';
+import { analyse } from './analyse.js';
+import {
+  getRecording, getSegments, saveAnalysis, saveSegments, setDuration, setStatus, unfinishedRecordingIds,
+} from './db.js';
 
 // One job at a time: keeps us under Groq's rate limits and keeps logs readable.
 const queue = [];
@@ -38,6 +41,24 @@ async function processRecording(id) {
 
   if (rec.duration_ms == null) setDuration(id, await probeDurationMs(rec.file_path));
 
+  // After a restart, a recording that was already transcribed only needs analysing.
+  if (rec.status !== 'transcribed' && rec.status !== 'analysing') await transcribeRecording(rec);
+
+  setStatus(id, 'analysing');
+  const segments = getSegments(id);
+  if (segments.length) {
+    const result = await analyse(rec, segments);
+    if (result.dropped) console.log(`dropped ${result.dropped} extracted item(s) citing missing lines`, id);
+    saveAnalysis(id, result);
+  } else {
+    saveAnalysis(id, { title: null, summary: null, action_items: [], mentions: [] });
+  }
+  setStatus(id, 'ready');
+  console.log('ready', id);
+}
+
+async function transcribeRecording(rec) {
+  const id = rec.id;
   setStatus(id, 'transcribing');
   const clean = rec.file_path.replace(/\.wav$/, '.16k.wav');
   try {

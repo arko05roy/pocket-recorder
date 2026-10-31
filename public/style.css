@@ -162,3 +162,50 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1
 @media (prefers-reduced-motion: no-preference) {
   .seg { transition: background-color .12s; }
 }
+
+/* Analysis */
+.summary { margin: 0 0 8px; font-size: 16px; line-height: 1.65; max-width: 62ch; }
+.summary.pending { color: var(--muted); font-size: 15px; }
+.section {
+  margin: 30px 0 8px; padding-bottom: 6px;
+  font-size: 13px; font-weight: 500; color: var(--muted);
+  border-bottom: 1px solid var(--line);
+}
+.none { margin: 0; color: var(--faint); font-size: 14px; }
+
+.at {
+  flex: none; align-self: start;
+  font: 12px var(--mono); color: var(--muted); font-variant-numeric: tabular-nums;
+  padding: 1px 6px; margin-top: 2px;
+  border: 1px solid var(--line); border-radius: 4px; background: var(--paper); cursor: pointer;
+}
+.at:hover { color: var(--rec); border-color: #F0C6C1; background: var(--rec-soft); }
+
+.todos, .rows { list-style: none; margin: 0; padding: 0; }
+.todos li { display: flex; gap: 10px; align-items: flex-start; padding: 7px 0; }
+.todos input { flex: none; width: 16px; height: 16px; margin: 4px 0 0; accent-color: #2383E2; cursor: pointer; }
+.todos li > div { flex: 1; min-width: 0; display: grid; }
+.todos .what { font-size: 15px; }
+.todos .meta { font-size: 13px; color: var(--muted); }
+.todos .meta b { font-weight: 500; color: var(--ink); }
+.todos li.done .what { color: var(--faint); text-decoration: line-through; }
+
+.rows li { display: grid; grid-template-columns: 130px minmax(0, 1fr) auto; gap: 12px; padding: 6px 0; font-size: 15px; align-items: start; }
+.rows .when { font-size: 13.5px; color: var(--muted); padding-top: 1px; }
+.tag { font-size: 12px; color: var(--muted); background: var(--hover); border-radius: 4px; padding: 1px 6px; margin-left: 4px; }
+
+.people { display: flex; flex-wrap: wrap; gap: 6px; padding-top: 4px; }
+.person {
+  display: inline-flex; gap: 6px; align-items: baseline;
+  padding: 3px 9px; border: 1px solid var(--line); border-radius: 999px; background: var(--paper);
+  font-size: 14px; cursor: pointer;
+}
+.person span { color: var(--muted); font-size: 13px; }
+.person:hover { background: var(--side); }
+
+.doc > .section:last-of-type { margin-bottom: 0; }
+
+@media (max-width: 760px) {
+  .rows li { grid-template-columns: minmax(0, 1fr) auto; }
+  .rows .when { grid-column: 1 / -1; padding: 0; }
+}

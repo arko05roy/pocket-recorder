@@ -45,7 +45,46 @@ db.exec(`
   CREATE TRIGGER IF NOT EXISTS segments_ad AFTER DELETE ON segments BEGIN
     INSERT INTO segments_fts(segments_fts, rowid, text) VALUES ('delete', old.id, old.text);
   END;
+
+  CREATE TABLE IF NOT EXISTS action_items (
+    id           INTEGER PRIMARY KEY,
+    recording_id TEXT NOT NULL REFERENCES recordings(id) ON DELETE CASCADE,
+    who          TEXT,
+    what         TEXT NOT NULL,
+    due_text     TEXT,
+    due_date     TEXT,
+    source_s     REAL NOT NULL,
+    status       TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'done'))
+  );
+
+  -- People, meetings and dates mentioned in a recording.
+  CREATE TABLE IF NOT EXISTS mentions (
+    id           INTEGER PRIMARY KEY,
+    recording_id TEXT NOT NULL REFERENCES recordings(id) ON DELETE CASCADE,
+    kind         TEXT NOT NULL CHECK (kind IN ('person', 'meeting', 'date')),
+    value        TEXT NOT NULL,
+    detail       TEXT,
+    date         TEXT,
+    time         TEXT,
+    source_s     REAL NOT NULL
+  );
 `);
+
+// Columns added after the first version of the table. ALTER TABLE has no
+// IF NOT EXISTS, so check the table's columns first.
+const recordingColumns = db.prepare('PRAGMA table_info(recordings)').all().map((c) => c.name);
+if (!recordingColumns.includes('title')) db.exec('ALTER TABLE recordings ADD COLUMN title TEXT');
+
+function transaction(fn) {
+  db.exec('BEGIN');
+  try {
+    fn();
+    db.exec('COMMIT');
+  } catch (err) {
+    db.exec('ROLLBACK');
+    throw err;
+  }
+}
 
 export function getRecording(id) {
   return db.prepare('SELECT * FROM recordings WHERE id = ?').get(id);
@@ -73,15 +112,43 @@ export function saveSegments(recordingId, segments) {
   const ins = db.prepare(
     'INSERT INTO segments (recording_id, idx, start_s, end_s, text) VALUES (?, ?, ?, ?, ?)'
   );
-  db.exec('BEGIN');
-  try {
+  transaction(() => {
     del.run(recordingId);
     segments.forEach((s, i) => ins.run(recordingId, i, s.start, s.end, s.text));
-    db.exec('COMMIT');
-  } catch (err) {
-    db.exec('ROLLBACK');
-    throw err;
-  }
+  });
+}
+
+// Replace a recording's analysis in one go, like saveSegments.
+export function saveAnalysis(recordingId, a) {
+  const insItem = db.prepare(`
+    INSERT INTO action_items (recording_id, who, what, due_text, due_date, source_s)
+    VALUES (?, ?, ?, ?, ?, ?)`);
+  const insMention = db.prepare(`
+    INSERT INTO mentions (recording_id, kind, value, detail, date, time, source_s)
+    VALUES (?, ?, ?, ?, ?, ?, ?)`);
+  transaction(() => {
+    db.prepare('DELETE FROM action_items WHERE recording_id = ?').run(recordingId);
+    db.prepare('DELETE FROM mentions WHERE recording_id = ?').run(recordingId);
+    db.prepare('UPDATE recordings SET title = ?, summary = ? WHERE id = ?').run(a.title, a.summary, recordingId);
+    for (const i of a.action_items) insItem.run(recordingId, i.who, i.what, i.due_text, i.due_date, i.source_s);
+    for (const m of a.mentions) insMention.run(recordingId, m.kind, m.value, m.detail, m.date, m.time, m.source_s);
+  });
+}
+
+export function getActionItems(recordingId) {
+  return db.prepare(
+    'SELECT id, who, what, due_text, due_date, source_s, status FROM action_items WHERE recording_id = ? ORDER BY source_s'
+  ).all(recordingId);
+}
+
+export function getMentions(recordingId) {
+  return db.prepare(
+    'SELECT kind, value, detail, date, time, source_s FROM mentions WHERE recording_id = ? ORDER BY source_s'
+  ).all(recordingId);
+}
+
+export function setActionItemStatus(id, status) {
+  return db.prepare('UPDATE action_items SET status = ? WHERE id = ?').run(status, id).changes;
 }
 
 export function getSegments(recordingId) {
@@ -92,7 +159,7 @@ export function getSegments(recordingId) {
 
 export function listRecordings() {
   return db.prepare(`
-    SELECT r.id, r.device_id, r.recorded_at, r.duration_ms, r.battery_pct, r.status, r.error,
+    SELECT r.id, r.device_id, r.recorded_at, r.duration_ms, r.battery_pct, r.status, r.error, r.title,
            (SELECT text FROM segments WHERE recording_id = r.id ORDER BY idx LIMIT 1) AS preview,
            (SELECT count(*) FROM segments WHERE recording_id = r.id) AS segment_count
     FROM recordings r
@@ -129,6 +196,6 @@ export function searchSegments(input, limit = 50) {
 // Recordings left mid-pipeline by a crash or restart.
 export function unfinishedRecordingIds() {
   return db.prepare(
-    "SELECT id FROM recordings WHERE status NOT IN ('transcribed', 'ready', 'error') ORDER BY recorded_at"
+    "SELECT id FROM recordings WHERE status NOT IN ('ready', 'error') ORDER BY recorded_at"
   ).all().map((r) => r.id);
 }
